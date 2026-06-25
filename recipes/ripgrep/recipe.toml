@@ -16,3 +16,7 @@ env = { }
 [maintainer]
 name = "userland.run"
 contact = "https://github.com/userland-run/catalog"
+
+[status]
+# Feature ids this recipe reports to the userland.run status hub.
+features = ["catalog.recipe.ripgrep"]

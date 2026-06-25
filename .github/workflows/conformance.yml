@@ -1,0 +1,122 @@
+name: nano-conformance-status
+
+# Run the full conformance suite over EVERY recipe on the default branch and
+# publish the per-app verdicts to the userland.run status hub. This is the
+# reporting counterpart to publish.yml: publish.yml gates+ships changed recipes
+# on a PR/merge; this keeps the hub's live picture of all recipes (and the
+# pipeline features) fresh on every push to main.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NANO_VERSION: "0.1.0"
+  NANO_RELEASE: "https://github.com/userland-run/nano/releases/download/v0.1.0"
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.list.outputs.recipes }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          # Emit a JSON array of ALL recipe names for the matrix.
+          recipes=$(ls -d recipes/*/ | sed 's#recipes/##; s#/##' | sort -u | jq -R . | jq -cs .)
+          echo "recipes=${recipes:-[]}" >> "$GITHUB_OUTPUT"
+          echo "recipes: ${recipes:-[]}"
+
+  conformance:
+    needs: discover
+    if: needs.discover.outputs.recipes != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.discover.outputs.recipes) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Toolchains: Rust RV64GC musl target + zig (for C/C++) + node.
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: riscv64gc-unknown-linux-musl }
+      - uses: goto-bus-stop/setup-zig@v2
+        with: { version: 0.13.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+
+      # [1] Compile the recipe.
+      - name: Build
+        run: bash recipes/${{ matrix.recipe }}/build.sh
+
+      # Fetch the matching nano runtime builds (plain + trace), same as publish.yml.
+      - name: Fetch nano runtime
+        run: |
+          curl -fsSL "$NANO_RELEASE/nano.min.wasm"   -o nano.min.wasm
+          curl -fsSL "$NANO_RELEASE/nano.trace.wasm" -o nano.trace.wasm
+
+      # [2] Conformance on real nano: plain (golden) then trace (syscall coverage).
+      - name: Conformance
+        run: |
+          bin=$(find recipes/${{ matrix.recipe }}/out -type f -perm -u+x | head -1)
+          echo "binary: $bin"
+          NANOVM_WASM=nano.min.wasm \
+            node tools/nano-conformance.mjs "$bin" --recipe recipes/${{ matrix.recipe }} --report verdict.json
+          NANOVM_WASM=nano.trace.wasm \
+            node tools/nano-conformance.mjs "$bin" --recipe recipes/${{ matrix.recipe }} --trace --merge verdict.json
+
+      # [3] Map the verdict → one contract result (the gate decides passed/failed;
+      # a gate rejection is recorded as status "failed", it does not fail the job).
+      - name: Result object
+        run: |
+          node tools/verdict-to-result.mjs verdict.json \
+            --recipe recipes/${{ matrix.recipe }} \
+            --syscalls tools/nano-syscalls.json \
+            --out result-${{ matrix.recipe }}.json
+          cat result-${{ matrix.recipe }}.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.recipe }}
+          path: result-${{ matrix.recipe }}.json
+
+  report:
+    needs: conformance
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+
+      # Each recipe uploaded result-<recipe>/result-<recipe>.json; flatten them.
+      - uses: actions/download-artifact@v4
+        with:
+          path: results
+          pattern: result-*
+          merge-multiple: true
+
+      # Merge the per-app results into one userland-results.json envelope.
+      - name: Merge results
+        run: |
+          node tools/merge-results.mjs results \
+            --out userland-results.json \
+            --source catalog --suite catalog-conformance
+          cat userland-results.json
+
+      # Validate + publish to the status hub (default-branch only).
+      - uses: userland-run/status/.github/actions/publish-results@main
+        if: github.ref == 'refs/heads/main'
+        with:
+          source: catalog
+          suite: catalog-conformance
+          results-file: userland-results.json
+          token: ${{ secrets.STATUS_DISPATCH_TOKEN }}
