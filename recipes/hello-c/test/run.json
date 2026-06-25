@@ -1,0 +1,11 @@
+{
+  "cmd": ["hello-c"],
+  "env": {},
+  "load": [],
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "56897dff1e0cb989dfc1bdae8c71b2b7b608ea16d4244b2f854b999f54c681db",
+    "maxInstructions": 50000000,
+    "maxWallMs": 10000
+  }
+}

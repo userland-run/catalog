@@ -1,0 +1,18 @@
+name = "hello-c"
+version = "1.0.0"
+abi = "riscv64gc-linux-musl"
+
+# A minimal C app — the fast smoke recipe that exercises the zig/musl build path
+# and the conformance gate. Its stdout is fixed, so the golden is build-independent.
+
+[source]
+# Self-contained: the source lives in this recipe (no external fetch).
+path = "src/hello.c"
+
+[entrypoint]
+argv = ["hello-c"]
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"

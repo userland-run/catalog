@@ -1,0 +1,26 @@
+{
+  "name": "@userland-run/catalog",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Build, conformance, and distribution pipeline for nano-compatible RISC-V apps.",
+  "type": "module",
+  "license": "AGPL-3.0-only OR LicenseRef-UEL",
+  "author": "Dietmar Rietsch / And The Next GmbH",
+  "homepage": "https://github.com/userland-run/catalog",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/userland-run/catalog.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "conform": "node tools/nano-conformance.mjs",
+    "gate": "node tools/gate.mjs",
+    "package": "node tools/package.mjs",
+    "publish-catalog": "node tools/publish.mjs",
+    "test": "node tools/test/run.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

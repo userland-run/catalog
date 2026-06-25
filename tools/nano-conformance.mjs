@@ -1,0 +1,505 @@
+#!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-UEL
+// Copyright (C) 2026 And The Next GmbH - https://userland.run
+//
+// Headless nano conformance runner. Loads a candidate static RV64GC ELF on the
+// real nano WASM runtime — the exact build that ships to browsers — and emits a
+// machine-readable verdict. This is `nano/test/run.mjs` distilled to a library
+// with: a deterministic clock + seeded RNG (so golden stdout is reproducible),
+// a separated stdout/stderr capture, and per-syscall coverage counting.
+//
+// Two passes (see the catalog publish.yml):
+//   NANOVM_WASM=nano.min.wasm   node nano-conformance.mjs <elf> --recipe <dir> --report verdict.json
+//   NANOVM_WASM=nano.trace.wasm node nano-conformance.mjs <elf> --recipe <dir> --trace --merge verdict.json
+//
+// The first proves pass/fail + golden output + budgets on the plain runtime; the
+// second fills in the syscall map from nano.trace.wasm's per-syscall debug_log.
+//
+// Verdict shape (spec §5.2):
+//   { loaded, exitCode, stdoutSha256, faulted, enosys,
+//     syscalls: { "<nr>": count, ... }, instructions, wallMs, peakRamMb }
+
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { MemFS } from "./vendor/memfs.mjs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Deterministic host environment — the key to a stable golden stdoutSha256.
+const FROZEN_EPOCH_MS = 1_735_689_600_000; // 2025-01-01T00:00:00Z, fixed
+function makeSeededRandom(seed) {
+  let s = seed >>> 0;
+  return () => {
+    // mulberry32 — small, deterministic float in [0,1)
+    s |= 0; s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---- VM struct offsets (must match nano/src/types.rs; same as run.mjs) ----
+const OFF_SP = 16;          // x[2]
+const OFF_A0 = 80;          // x[10]
+const OFF_BRK_START = 560;  // brk/memory block
+const OFF_BRK_CURRENT = 568;
+const OFF_STATUS = 528;
+const OFF_CWD = 3680;
+const FD_TABLE_OFF = 600, FD_ENTRY_SIZE = 24, MAX_FDS = 64;
+const FD_TYPE_NONE = 0, FD_TYPE_STDIN = 1, FD_TYPE_STDERR = 3, FD_TYPE_FILE = 4, FD_TYPE_DIR = 5, FD_TYPE_PIPE = 6;
+
+// FS_PENDING syscall numbers (RISC-V Linux)
+const SYS_GETCWD = 17, SYS_MKDIRAT = 34, SYS_UNLINKAT = 35, SYS_FACCESSAT = 48,
+      SYS_OPENAT = 56, SYS_CLOSE = 57, SYS_GETDENTS64 = 61, SYS_LSEEK = 62,
+      SYS_READ = 63, SYS_WRITE = 64, SYS_PREAD64 = 67, SYS_PREADV = 69,
+      SYS_READLINKAT = 78, SYS_NEWFSTATAT = 79, SYS_FSTAT = 80,
+      SYS_UTIMENSAT = 88, SYS_RENAMEAT2 = 276, SYS_STATX = 291;
+
+/**
+ * Run one conformance pass.
+ * @param {object} o
+ * @param {string} o.wasmPath  path to nano.min.wasm or nano.trace.wasm
+ * @param {Uint8Array} o.elf   candidate ELF bytes
+ * @param {object} o.run       parsed run.json
+ * @param {string} o.recipeDir recipe directory (to resolve `load` fixtures)
+ * @returns {object} verdict
+ */
+export async function runPass({ wasmPath, elf, run, recipeDir }) {
+  const wasmBytes = readFileSync(wasmPath);
+  const ramMb = Number(run.ramMb) > 0 ? Number(run.ramMb) : 1024;
+  const RAM_SIZE = ramMb * 1024 * 1024;
+  const ramPages = Math.max(3072, Math.floor(RAM_SIZE / 65536)); // >= module initial
+  const memory = new WebAssembly.Memory({ initial: ramPages, maximum: 32768, shared: true });
+
+  // Capture stdout/stderr as bytes (stdout is hashed for the golden compare).
+  const stdoutChunks = [];
+  const stderrChunks = [];
+  const syscalls = {};
+  const rand = makeSeededRandom(0xC0FFEE);
+  let aborted = false;
+
+  const imports = {
+    env: {
+      memory,
+      abort_js() { aborted = true; throw new Error("abort_js"); },
+      debug_log(v) {
+        if (((v >>> 24) & 0xff) === 0x0a) {
+          const nr = v & 0xffff;
+          syscalls[nr] = (syscalls[nr] || 0) + 1;
+        }
+      },
+      emscripten_random() { return rand(); },
+      emscripten_date_now() { return FROZEN_EPOCH_MS; },
+      console_write(fd, ptr, len) {
+        const bytes = new Uint8Array(memory.buffer.slice(ptr, ptr + len));
+        if (fd === 2) stderrChunks.push(bytes); else stdoutChunks.push(bytes);
+      },
+    },
+  };
+
+  const { instance } = await WebAssembly.instantiate(wasmBytes, imports);
+  const X = instance.exports;
+
+  const vmPtr = X.vm_create(RAM_SIZE);
+  if (vmPtr === 0) {
+    return verdict({ loaded: false, exitCode: -1, stdout: [], stderr: stderrChunks, faulted: true,
+                     enosys: false, syscalls, instructions: 0, wallMs: 0, peakRamMb: 0 });
+  }
+  const ramPtr = X.vm_ram_ptr(vmPtr);
+
+  // Load the candidate ELF at guest offset 0.
+  new Uint8Array(memory.buffer).set(elf, ramPtr);
+  const loadRc = X.vm_load_elf(vmPtr, 0, elf.length);
+  if (loadRc !== 0) {
+    return verdict({ loaded: false, exitCode: -1, stdout: [], stderr: stderrChunks, faulted: false,
+                     enosys: false, syscalls, instructions: 0, wallMs: 0, peakRamMb: 0 });
+  }
+
+  const dv = new DataView(memory.buffer);
+  setupStack(dv, memory, ramPtr, vmPtr, RAM_SIZE, run.cmd || ["app"], run.env || {});
+
+  const memfs = seedFs(RAM_SIZE, ramMb);
+  // `load[].from` is relative to the recipe's test/ dir (where run.json lives),
+  // matching the spec — e.g. "fixtures/corpus.txt".
+  loadFixtures(memfs, run.load || [], resolve(recipeDir, "test"));
+
+  // ---- exec loop ----
+  // Exact instruction count comes from nano's block-cache counters
+  // (block_insns + baseline_insns), which start at 0 for a fresh VM. Far more
+  // precise than the per-step budget delta, which is granular to one BUDGET.
+  const totalInsns = () => {
+    if (typeof X.debug_block_insns !== "function") return 0;
+    return Number(X.debug_block_insns()) + Number(X.debug_baseline_insns());
+  };
+  let enosys = false;
+  let faulted = false;
+  let exitCode = -1;
+  let instructions = 0;
+  const BUDGET = 1_000_000;
+  const maxInstr = Number(run?.expect?.maxInstructions) > 0 ? Number(run.expect.maxInstructions) : 5e9;
+  const hardInstrCap = maxInstr * 2;        // bound runaway; gate soft-fails on the real count
+  const maxWallMs = Number(run?.expect?.maxWallMs) > 0 ? Number(run.expect.maxWallMs) : 60_000;
+  const hardWallMs = maxWallMs * 2;
+  const t0 = Date.now();
+  let budgetExceeded = false;
+
+  for (;;) {
+    instructions = totalInsns();
+    if (instructions >= hardInstrCap || (Date.now() - t0) >= hardWallMs) { budgetExceeded = true; break; }
+    try {
+      X.vm_step(vmPtr, BUDGET);
+    } catch (e) {
+      faulted = true;
+      break;
+    }
+    const status = X.debug_status(vmPtr);
+
+    if (status === 3) {
+      exitCode = X.vm_exit_code(vmPtr);
+      if (X.debug_fault_pc(vmPtr) !== 0n && X.debug_fault_pc(vmPtr) !== 0) faulted = true;
+      break;
+    }
+    if (status === 6) {
+      const nr = processFsRequest(X, dv, memory, ramPtr, vmPtr, memfs);
+      if (nr === -38) enosys = true;
+      continue;
+    }
+    if (status === 7) {                       // EPOLL_BLOCKED → EINTR, keep going
+      dv.setBigInt64(vmPtr + OFF_A0, -4n, true);
+      dv.setInt32(vmPtr + OFF_STATUS, 0, true);
+      continue;
+    }
+    if (status !== 0 && status !== 18) { faulted = true; break; }
+  }
+
+  instructions = totalInsns() || instructions;
+  const wallMs = Date.now() - t0;
+  const peakRamMb = readPeakRamMb(dv, vmPtr);
+
+  return verdict({
+    loaded: true, exitCode, stdout: stdoutChunks, stderr: stderrChunks,
+    faulted: faulted || aborted, enosys, syscalls, instructions, wallMs, peakRamMb, budgetExceeded,
+  });
+}
+
+function verdict({ loaded, exitCode, stdout, stderr, faulted, enosys, syscalls, instructions, wallMs, peakRamMb, budgetExceeded = false }) {
+  const stdoutBytes = concat(stdout);
+  const stderrBytes = concat(stderr);
+  return {
+    loaded,
+    exitCode,
+    stdoutSha256: sha256hex(stdoutBytes),
+    faulted,
+    enosys,
+    syscalls: Object.fromEntries(Object.entries(syscalls).map(([k, v]) => [String(k), v])),
+    instructions,
+    wallMs,
+    peakRamMb,
+    budgetExceeded,
+    // diagnostics (not part of the gate, handy in CI logs):
+    stdoutBytes: stdoutBytes.length,
+    stderrPreview: new TextDecoder().decode(stderrBytes.subarray(0, 2000)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Stack / argv / env setup — ported from nano/test/run.mjs (preserves auxv).
+// ---------------------------------------------------------------------------
+function setupStack(dv, memory, ramPtr, vmPtr, RAM_SIZE, argv, envObj) {
+  const enc = new TextEncoder();
+  const mem = new Uint8Array(memory.buffer);
+  const envVars = Object.entries(envObj).map(([k, v]) => `${k}=${v}`);
+
+  let strGuest = RAM_SIZE - 4096 - 64;
+  const argGuestAddrs = [];
+  for (const arg of argv) {
+    const bytes = enc.encode(arg + "\0");
+    argGuestAddrs.push(strGuest);
+    mem.set(bytes, ramPtr + strGuest);
+    strGuest += bytes.length;
+  }
+  const envGuestAddrs = [];
+  for (const e of envVars) {
+    const bytes = enc.encode(e + "\0");
+    envGuestAddrs.push(strGuest);
+    mem.set(bytes, ramPtr + strGuest);
+    strGuest += bytes.length;
+  }
+
+  const sp = Number(dv.getBigUint64(vmPtr + OFF_SP, true));
+  const auxvStart = sp + 32;
+  const auxvPairs = [];
+  let auxOff = auxvStart;
+  for (let i = 0; i < 16; i++) {
+    const atype = Number(dv.getBigUint64(ramPtr + auxOff, true));
+    const aval = dv.getBigUint64(ramPtr + auxOff + 8, true);
+    auxvPairs.push([atype, aval]);
+    auxOff += 16;
+    if (atype === 0) break;
+  }
+
+  const argc = argv.length, envc = envGuestAddrs.length;
+  const stackDataSize = 8 + (argc + 1) * 8 + (envc + 1) * 8 + auxvPairs.length * 16;
+  const newSp = (sp - 512 - stackDataSize) & ~0xF;
+  let pos = newSp;
+  dv.setBigUint64(ramPtr + pos, BigInt(argc), true); pos += 8;
+  for (const a of argGuestAddrs) { dv.setBigUint64(ramPtr + pos, BigInt(a), true); pos += 8; }
+  dv.setBigUint64(ramPtr + pos, 0n, true); pos += 8;
+  for (const a of envGuestAddrs) { dv.setBigUint64(ramPtr + pos, BigInt(a), true); pos += 8; }
+  dv.setBigUint64(ramPtr + pos, 0n, true); pos += 8;
+  for (const [atype, aval] of auxvPairs) {
+    dv.setBigUint64(ramPtr + pos, BigInt(atype), true); pos += 8;
+    dv.setBigUint64(ramPtr + pos, aval, true); pos += 8;
+  }
+  dv.setBigUint64(vmPtr + OFF_SP, BigInt(newSp), true);
+}
+
+// ---------------------------------------------------------------------------
+// VFS seed (subset of run.mjs's seed — the common files programs probe).
+// ---------------------------------------------------------------------------
+function seedFs(RAM_SIZE, RAM_MB) {
+  const memfs = new MemFS();
+  memfs.createDir("/bin");
+  memfs.createDir("/dev");
+  memfs.createFile("/dev/null", "");
+  memfs.createDir("/etc");
+  memfs.createFile("/etc/passwd", "root:x:0:0:root:/root:/bin/sh\n");
+  memfs.createFile("/etc/group", "root:x:0:\n");
+  memfs.createFile("/etc/hostname", "nanovm\n");
+  memfs.createDir("/proc/self");
+  memfs.createFile("/proc/cpuinfo", "processor\t: 0\nisa\t\t: rv64imafdc\nmmu\t\t: sv39\n");
+  const totalPages = Math.floor(RAM_SIZE / 4096);
+  const usedPages = Math.floor(totalPages * 0.3);
+  memfs.createFile("/proc/self/statm", `${totalPages} ${usedPages} 0 ${Math.floor(usedPages / 2)} 0 ${Math.floor(usedPages / 2)} 0\n`);
+  memfs.createFile("/proc/meminfo", `MemTotal:       ${RAM_MB * 1024} kB\nMemFree:        ${Math.floor(RAM_MB * 1024 * 0.8)} kB\n`);
+  memfs.createDir("/root");
+  memfs.createDir("/tmp");
+  memfs.createDir("/usr");
+  memfs.createDir("/usr/bin");
+  memfs.createDir("/var");
+  return memfs;
+}
+
+function loadFixtures(memfs, load, recipeDir) {
+  for (const item of load) {
+    const fromPath = resolve(recipeDir, item.from);
+    const to = item.to;
+    const data = readFileSync(fromPath);
+    const parts = to.split("/").filter(Boolean);
+    let dir = "";
+    for (let j = 0; j < parts.length - 1; j++) {
+      dir += "/" + parts[j];
+      try { memfs.createDir(dir); } catch { /* exists */ }
+    }
+    memfs.createFile(to, data);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FS dispatch — ported from nano/test/run.mjs processFsRequest. Returns the
+// syscall number (or -38 when an unhandled syscall hit the bridge → ENOSYS).
+// ---------------------------------------------------------------------------
+function processFsRequest(X, dv, memory, ramPtr, vmPtr, memfs) {
+  const reqPtr = X.vm_fs_request_ptr(vmPtr);
+  const syscallNr = dv.getInt32(reqPtr, true);
+  const gfd = dv.getInt32(reqPtr + 4, true);
+  const arg1 = Number(dv.getBigInt64(reqPtr + 8, true));
+  const arg2 = Number(dv.getBigInt64(reqPtr + 16, true));
+  const bufPtr = dv.getUint32(reqPtr + 32, true);
+  const bufLen = dv.getUint32(reqPtr + 36, true);
+
+  const path = resolvePath(dv, memory, reqPtr + 40, vmPtr);
+  const path2 = resolvePath(dv, memory, reqPtr + 296, vmPtr);
+
+  const fdRead = (g) => {
+    const o = vmPtr + FD_TABLE_OFF + g * FD_ENTRY_SIZE;
+    return { fd_type: dv.getInt32(o, true), host_fd: dv.getInt32(o + 4, true),
+             offset: Number(dv.getBigInt64(o + 8, true)), flags: dv.getInt32(o + 16, true) };
+  };
+  const fdWrite = (g, t, h, off, fl) => {
+    const o = vmPtr + FD_TABLE_OFF + g * FD_ENTRY_SIZE;
+    dv.setInt32(o, t, true); dv.setInt32(o + 4, h, true);
+    dv.setBigInt64(o + 8, BigInt(off), true); dv.setInt32(o + 16, fl, true); dv.setInt32(o + 20, 0, true);
+  };
+  const fdClear = (g) => fdWrite(g, 0, -1, 0, 0);
+  const fdAlloc = () => { for (let i = 3; i < MAX_FDS; i++) if (dv.getInt32(vmPtr + FD_TABLE_OFF + i * FD_ENTRY_SIZE, true) === FD_TYPE_NONE) return i; return -24; };
+  const fdOff = (g, n) => dv.setBigInt64(vmPtr + FD_TABLE_OFF + g * FD_ENTRY_SIZE + 8, BigInt(n), true);
+
+  let result = 0;
+  switch (syscallNr) {
+    case SYS_OPENAT: {
+      const hostFd = memfs.open(path, arg1, arg2);
+      if (hostFd < 0) { result = hostFd; break; }
+      const ng = fdAlloc();
+      if (ng < 0) { memfs.close(hostFd); result = ng; break; }
+      const entry = memfs.openFiles.get(hostFd);
+      fdWrite(ng, (entry && entry.node.isDir) ? FD_TYPE_DIR : FD_TYPE_FILE, hostFd, 0, arg1);
+      result = ng; break;
+    }
+    case SYS_CLOSE: {
+      if (gfd < 0 || gfd >= MAX_FDS) { result = -9; break; }
+      const fe = fdRead(gfd);
+      if (fe.fd_type === FD_TYPE_NONE) { result = -9; break; }
+      if (fe.fd_type === FD_TYPE_FILE || fe.fd_type === FD_TYPE_DIR) memfs.close(fe.host_fd);
+      fdClear(gfd); result = 0; break;
+    }
+    case SYS_LSEEK: {
+      if (gfd < 0 || gfd >= MAX_FDS) { result = -9; break; }
+      const fe = fdRead(gfd);
+      if (fe.fd_type === FD_TYPE_NONE) { result = -9; break; }
+      let n;
+      if (arg2 === 0) n = arg1;
+      else if (arg2 === 1) n = fe.offset + arg1;
+      else if (arg2 === 2) { const sz = memfs.lseekSize(fe.host_fd); n = (sz < 0 ? 0 : sz) + arg1; }
+      else { result = -22; break; }
+      if (n < 0) { result = -22; break; }
+      fdOff(gfd, n); result = n; break;
+    }
+    case SYS_READ: {
+      if (gfd < 0 || gfd >= MAX_FDS) { result = -9; break; }
+      const fe = fdRead(gfd);
+      if (fe.fd_type === FD_TYPE_STDIN) { result = 0; break; } // no live stdin in conformance
+      if (fe.fd_type === FD_TYPE_PIPE) { result = 0; break; }
+      if (fe.fd_type !== FD_TYPE_FILE && fe.fd_type !== FD_TYPE_DIR) { result = -9; break; }
+      const n = memfs.pread(fe.host_fd, memory, ramPtr + bufPtr, bufLen || arg1, fe.offset);
+      if (n > 0) fdOff(gfd, fe.offset + n);
+      result = n; break;
+    }
+    case SYS_PREAD64:
+    case SYS_PREADV: {
+      if (gfd < 0 || gfd >= MAX_FDS) { result = -9; break; }
+      const fe = fdRead(gfd);
+      if (fe.fd_type !== FD_TYPE_FILE) { result = -9; break; }
+      result = memfs.pread(fe.host_fd, memory, ramPtr + bufPtr, bufLen || arg1, arg2); break;
+    }
+    case SYS_WRITE: {
+      if (gfd < 0 || gfd >= MAX_FDS) { result = -9; break; }
+      const fe = fdRead(gfd);
+      if (fe.fd_type === FD_TYPE_PIPE) { result = bufLen || arg1; break; }
+      if (fe.fd_type !== FD_TYPE_FILE) { result = -9; break; }
+      let off = fe.offset;
+      if (fe.flags & 0x400) { const sz = memfs.lseekSize(fe.host_fd); if (sz >= 0) off = sz; }
+      const n = memfs.pwrite(fe.host_fd, memory, ramPtr + bufPtr, bufLen || arg1, off);
+      if (n > 0) fdOff(gfd, off + n);
+      result = n; break;
+    }
+    case SYS_GETDENTS64: {
+      if (gfd < 0 || gfd >= MAX_FDS) { result = -9; break; }
+      const fe = fdRead(gfd);
+      if (fe.fd_type !== FD_TYPE_DIR) { result = -20; break; }
+      const r = memfs.getdents(fe.host_fd, memory, ramPtr + arg1, arg2, fe.offset);
+      if (typeof r === "object") { result = r.bytes; fdOff(gfd, r.nextCookie); } else result = r;
+      break;
+    }
+    case SYS_FSTAT: {
+      if (gfd < 0 || gfd >= MAX_FDS) { result = -9; break; }
+      const fe = fdRead(gfd);
+      const phys = ramPtr + (arg1 >>> 0);
+      if (fe.fd_type >= FD_TYPE_STDIN && fe.fd_type <= FD_TYPE_STDERR) result = memfs._writeCharDevStat(memory, phys);
+      else if (fe.fd_type === FD_TYPE_FILE || fe.fd_type === FD_TYPE_DIR) result = memfs.fstat(fe.host_fd, memory, phys);
+      else result = -9;
+      break;
+    }
+    case SYS_NEWFSTATAT: result = memfs.stat(path, memory, ramPtr + (arg1 >>> 0), arg2); break;
+    case SYS_READLINKAT: result = memfs.readlink(path, memory, ramPtr + (arg1 >>> 0), arg2); break;
+    case SYS_MKDIRAT: result = memfs.mkdir(path, arg1); break;
+    case SYS_UNLINKAT: result = memfs.unlink(path, arg1); break;
+    case SYS_FACCESSAT: result = memfs.access(path); break;
+    case SYS_RENAMEAT2: result = memfs.rename(path, path2); break;
+    case SYS_UTIMENSAT: result = 0; break;
+    case SYS_STATX: result = memfs.statx(path, memory, ramPtr + (arg2 >>> 0), arg1); break;
+    default: result = -38; break; // ENOSYS reaching the bridge
+  }
+
+  dv.setBigInt64(vmPtr + OFF_A0, BigInt(result), true);
+  dv.setInt32(vmPtr + OFF_STATUS, 0, true);
+  return syscallNr === undefined ? -38 : (result === -38 ? -38 : syscallNr);
+}
+
+function resolvePath(dv, memory, off, vmPtr) {
+  const bytes = new Uint8Array(memory.buffer, off, 256);
+  let e = 0; while (e < 256 && bytes[e] !== 0) e++;
+  const raw = e > 0 ? new TextDecoder().decode(bytes.subarray(0, e)) : "";
+  if (!raw) return readCwd(memory, vmPtr);
+  if (raw.startsWith("/")) return raw;
+  const cwd = readCwd(memory, vmPtr);
+  return cwd === "/" ? "/" + raw : cwd + "/" + raw;
+}
+function readCwd(memory, vmPtr) {
+  const b = new Uint8Array(memory.buffer, vmPtr + OFF_CWD, 256);
+  let e = 0; while (e < 256 && b[e] !== 0) e++;
+  return new TextDecoder().decode(b.subarray(0, e)) || "/";
+}
+
+function readPeakRamMb(dv, vmPtr) {
+  // Best-effort: heap bytes grown via brk. Informational only (gate uses
+  // instruction/wall budgets, not RAM).
+  try {
+    const start = dv.getBigUint64(vmPtr + OFF_BRK_START, true);
+    const cur = dv.getBigUint64(vmPtr + OFF_BRK_CURRENT, true);
+    const bytes = cur > start ? Number(cur - start) : 0;
+    return Math.ceil(bytes / (1024 * 1024));
+  } catch { return 0; }
+}
+
+// ---------------------------------------------------------------------------
+function concat(chunks) {
+  let len = 0; for (const c of chunks) len += c.length;
+  const out = new Uint8Array(len);
+  let p = 0; for (const c of chunks) { out.set(c, p); p += c.length; }
+  return out;
+}
+function sha256hex(bytes) { return createHash("sha256").update(bytes).digest("hex"); }
+
+// ===========================================================================
+// CLI
+// ===========================================================================
+async function main() {
+  const argv = process.argv.slice(2);
+  const getOpt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
+  // First positional that isn't a flag or a flag's value.
+  const valueFlags = new Set(["--recipe", "--report", "--merge"]);
+  let elfPath;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith("--")) { if (valueFlags.has(argv[i])) i++; continue; }
+    elfPath = argv[i]; break;
+  }
+  const recipeDir = resolve(getOpt("--recipe") || ".");
+  const reportPath = getOpt("--report");
+  const mergePath = getOpt("--merge");
+  const isTrace = argv.includes("--trace") || !!mergePath;
+
+  if (!elfPath || !existsSync(elfPath)) { console.error("usage: nano-conformance.mjs <elf> --recipe <dir> [--report f | --trace --merge f]"); process.exit(2); }
+
+  const wasmPath = process.env.NANOVM_WASM;
+  if (!wasmPath || !existsSync(wasmPath)) { console.error(`NANOVM_WASM not set or missing: ${wasmPath}`); process.exit(2); }
+
+  const runJsonPath = resolve(recipeDir, "test/run.json");
+  const run = JSON.parse(readFileSync(runJsonPath, "utf8"));
+  const elf = new Uint8Array(readFileSync(elfPath));
+
+  const v = await runPass({ wasmPath, elf, run, recipeDir });
+
+  if (mergePath) {
+    // Trace pass: keep the plain verdict authoritative for everything except the
+    // syscall map, which only the trace build can produce.
+    const base = JSON.parse(readFileSync(mergePath, "utf8"));
+    base.syscalls = v.syscalls;
+    base.traceExitCode = v.exitCode;             // sanity: should match plain run
+    base.traceStdoutSha256 = v.stdoutSha256;
+    writeFileSync(mergePath, JSON.stringify(base, null, 2) + "\n");
+    console.error(`[conformance] merged ${Object.keys(v.syscalls).length} syscalls into ${mergePath}`);
+  } else if (reportPath) {
+    writeFileSync(reportPath, JSON.stringify(v, null, 2) + "\n");
+    console.error(`[conformance] wrote ${reportPath} (loaded=${v.loaded} exit=${v.exitCode} faulted=${v.faulted} insns=${v.instructions})`);
+  } else {
+    process.stdout.write(JSON.stringify(v, null, 2) + "\n");
+  }
+  process.exit(0);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => { console.error(e); process.exit(1); });
+}

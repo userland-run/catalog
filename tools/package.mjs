@@ -1,0 +1,154 @@
+#!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-UEL
+// Copyright (C) 2026 And The Next GmbH - https://userland.run
+//
+// Stage 4 — Package (spec §6). Runs only on green, after merge. For each built
+// recipe it: strips the binary, gzip -9's it, FastCDC-chunks the gzip stream,
+// sha256's each chunk into cas/<sha256>, assembles the .napp manifest (with the
+// conformance block taken from the verdict), and Ed25519-signs it. The signed
+// manifest is itself stored as a cas blob (its sha256 is its content address).
+//
+// Input layout (what the publish job's download-artifact produces):
+//   <artifacts>/build-<recipe>/out/<binary>
+//   <artifacts>/build-<recipe>/verdict.json
+// plus the checked-out repo's recipes/<recipe>/recipe.toml for identity.
+//
+// Output:
+//   <out>/cas/<sha256>        chunk blobs + signed manifest blobs
+//   <out>/manifests.json      [{ name, version, manifestSha, size }]  (for publish.mjs)
+//
+// Usage: node tools/package.mjs <artifacts> --out dist [--recipes recipes]
+//   env CATALOG_SIGNING_KEY (or CATALOG_ED25519_PRIVATE_KEY): base64 PKCS8 / PEM
+//   env NANO_VERSION: pinned nano runtime version (default from nano-syscalls.json)
+
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs";
+import { gzipSync } from "node:zlib";
+import { execFileSync } from "node:child_process";
+import { resolve, dirname, basename } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseToml } from "./lib/toml.mjs";
+import { chunk } from "./lib/fastcdc.mjs";
+import { finalizeManifest, sha256hex, loadPrivateKey } from "./lib/manifest.mjs";
+
+const toolsDir = dirname(fileURLToPath(import.meta.url));
+const root = resolve(toolsDir, "..");
+
+function getOpt(name, def) { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : def; }
+
+const artifactsDir = process.argv[2] && !process.argv[2].startsWith("--") ? resolve(process.argv[2]) : resolve("artifacts");
+const outDir = resolve(getOpt("--out", "dist"));
+const recipesDir = resolve(getOpt("--recipes", resolve(root, "recipes")));
+
+const secret = process.env.CATALOG_SIGNING_KEY || process.env.CATALOG_ED25519_PRIVATE_KEY;
+if (!secret) { console.error("error: CATALOG_SIGNING_KEY (or CATALOG_ED25519_PRIVATE_KEY) not set"); process.exit(1); }
+const privateKey = loadPrivateKey(secret);
+
+const nanoVersion = process.env.NANO_VERSION
+  || (existsSync(resolve(toolsDir, "nano-syscalls.json")) ? JSON.parse(readFileSync(resolve(toolsDir, "nano-syscalls.json"), "utf8")).nano_version : "0.0.0");
+
+const casDir = resolve(outDir, "cas");
+mkdirSync(casDir, { recursive: true });
+
+// Best-effort strip: try cross-strip tools, fall back to leaving symbols in.
+function tryStrip(bytes) {
+  const tools = ["llvm-strip", "riscv64-linux-gnu-strip", "riscv64-linux-musl-strip", "riscv64-unknown-elf-strip"];
+  for (const t of tools) {
+    try {
+      const tmp = resolve(outDir, ".strip.tmp");
+      writeFileSync(tmp, bytes);
+      execFileSync(t, ["-s", tmp], { stdio: "ignore" });
+      const out = readFileSync(tmp);
+      try { execFileSync("rm", ["-f", tmp]); } catch {}
+      return { bytes: out, tool: t };
+    } catch { /* try next */ }
+  }
+  return { bytes, tool: null };
+}
+
+function writeCas(bytes) {
+  const sha = sha256hex(bytes);
+  const p = resolve(casDir, sha);
+  if (!existsSync(p)) writeFileSync(p, bytes);   // dedup: write once
+  return sha;
+}
+
+// Find a recipe's built binary + verdict in the artifacts tree.
+function findBuild(artifactDir) {
+  const verdictPath = resolve(artifactDir, "verdict.json");
+  // binary: first executable regular file under out/
+  const outRoot = resolve(artifactDir, "out");
+  let binary = null;
+  if (existsSync(outRoot)) {
+    for (const name of readdirSync(outRoot)) {
+      const p = resolve(outRoot, name);
+      const st = statSync(p);
+      if (st.isFile()) { binary = p; break; }
+    }
+  }
+  return { binary, verdictPath: existsSync(verdictPath) ? verdictPath : null };
+}
+
+const records = [];
+const buildDirs = existsSync(artifactsDir)
+  ? readdirSync(artifactsDir).map((d) => resolve(artifactsDir, d)).filter((p) => statSync(p).isDirectory())
+  : [];
+
+for (const dir of buildDirs) {
+  // artifact dir name is "build-<recipe>"
+  const recipeName = basename(dir).replace(/^build-/, "");
+  const recipeTomlPath = resolve(recipesDir, recipeName, "recipe.toml");
+  if (!existsSync(recipeTomlPath)) { console.error(`skip ${recipeName}: no recipe.toml`); continue; }
+  const { binary, verdictPath } = findBuild(dir);
+  if (!binary) { console.error(`skip ${recipeName}: no binary in out/`); continue; }
+  if (!verdictPath) { console.error(`skip ${recipeName}: no verdict.json`); continue; }
+
+  const recipe = parseToml(readFileSync(recipeTomlPath, "utf8"));
+  const verdict = JSON.parse(readFileSync(verdictPath, "utf8"));
+
+  const raw = readFileSync(binary);
+  const stripped = tryStrip(raw);
+  const gz = gzipSync(stripped.bytes, { level: 9 });
+
+  // FastCDC chunk the gzip stream → cas blobs.
+  const ranges = chunk(gz);
+  const chunkShas = ranges.map((r) => writeCas(gz.subarray(r.start, r.end)));
+
+  const installPath = recipe.entrypoint?.path
+    || `/usr/bin/${(recipe.entrypoint?.argv && recipe.entrypoint.argv[0]) || recipeName}`;
+
+  const fileEntry = {
+    path: installPath,
+    mode: "0755",
+    compression: "gzip",
+    size: stripped.bytes.length,        // decompressed size the guest sees
+    sha256: sha256hex(gz),              // hash of the stored (gzipped) object = concat of chunks
+    chunks: chunkShas,
+  };
+
+  const manifestCore = {
+    name: recipe.name || recipeName,
+    version: String(recipe.version ?? "0.0.0"),
+    abi: recipe.abi || "riscv64gc-linux-musl",
+    entrypoint: { argv: recipe.entrypoint?.argv || [recipeName], env: recipe.entrypoint?.env || {} },
+    files: [fileEntry],
+    conformance: {
+      nano_min_version: nanoVersion,
+      syscalls_used: Object.keys(verdict.syscalls || {}).map(Number).sort((a, b) => a - b),
+      golden_sha256: verdict.stdoutSha256,
+      instructions: verdict.instructions,
+      tested: true,
+    },
+    size: gz.length,                    // total transferred (compressed) bytes
+  };
+
+  const { manifest, bytes } = finalizeManifest(manifestCore, privateKey);
+  const manifestSha = writeCas(bytes);  // signed manifest stored as a cas blob
+
+  records.push({ name: manifest.name, version: manifest.version, manifestSha, size: manifest.size });
+  console.error(`packaged ${manifest.name}@${manifest.version}: ${chunkShas.length} chunk(s), ` +
+    `gz ${(gz.length / 1024 / 1024).toFixed(2)}MB, strip=${stripped.tool || "skipped"}, manifest ${manifestSha.slice(0, 12)}…`);
+}
+
+writeFileSync(resolve(outDir, "manifests.json"), JSON.stringify(records, null, 2) + "\n");
+console.error(`\nwrote ${records.length} manifest record(s) → ${resolve(outDir, "manifests.json")}`);
+console.error(`cas blobs in ${casDir}`);

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+artifacts/
+*.wasm
+nano-syscalls.released.json
+verdict.json
+recipes/*/out/
+recipes/*/.build/
+.DS_Store

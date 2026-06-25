@@ -1,0 +1,135 @@
+name: nano-app-publish
+
+# Test every PR on the real nano runtime; publish only after merge to main.
+# Stages 4–5 (package/sign/publish) run solely in the `publish` job on push to
+# main, so untrusted PRs never reach the signing key — the trust boundary.
+
+on:
+  pull_request:
+    paths: ["recipes/**"]
+  push:
+    branches: [main]
+    paths: ["recipes/**"]
+
+permissions:
+  contents: read
+
+env:
+  NANO_VERSION: "0.1.0"
+  NANO_RELEASE: "https://github.com/userland-run/nano/releases/download/v0.1.0"
+
+jobs:
+  changed:
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.detect.outputs.recipes }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: detect
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.sha }}
+        run: |
+          # Emit a JSON array of changed recipe names for the matrix.
+          range="${BASE}..${HEAD}"
+          if ! git rev-parse "$BASE" >/dev/null 2>&1; then range="$HEAD"; fi  # first push / shallow
+          changed=$(git diff --name-only $range -- 'recipes/' \
+            | sed -n 's#^recipes/\([^/]*\)/.*#\1#p' | sort -u | jq -R . | jq -cs .)
+          echo "recipes=${changed:-[]}" >> "$GITHUB_OUTPUT"
+          echo "changed recipes: ${changed:-[]}"
+
+  build-test:
+    needs: changed
+    if: needs.changed.outputs.recipes != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.changed.outputs.recipes) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Toolchains: Rust RV64GC musl target + zig (for C/C++) + node.
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: riscv64gc-unknown-linux-musl }
+      - uses: goto-bus-stop/setup-zig@v2
+        with: { version: 0.13.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+
+      # [1] Compile
+      - name: Build
+        run: bash recipes/${{ matrix.recipe }}/build.sh
+
+      # [2] Validate (static / RV64GC / no unsupported extensions)
+      - name: Validate ELF
+        run: |
+          bin=$(find recipes/${{ matrix.recipe }}/out -type f -perm -u+x | head -1)
+          echo "binary: $bin"
+          tools/validate-elf.sh "$bin"
+
+      # Fetch the matching nano runtime builds (plain + trace) + syscall manifest.
+      - name: Fetch nano runtime
+        run: |
+          curl -fsSL "$NANO_RELEASE/nano.min.wasm"      -o nano.min.wasm
+          curl -fsSL "$NANO_RELEASE/nano.trace.wasm"    -o nano.trace.wasm
+          curl -fsSL "$NANO_RELEASE/nano-syscalls.json" -o nano-syscalls.json
+          # Drift guard: the pinned set must match the released runtime.
+          if ! diff -q <(jq -S '.supported' nano-syscalls.json) <(jq -S '.supported' tools/nano-syscalls.json) >/dev/null; then
+            echo "::error::tools/nano-syscalls.json is out of sync with nano $NANO_VERSION — re-pin it"; exit 1
+          fi
+
+      # [3] Conformance on real nano: plain (golden) then trace (syscall coverage), then gate.
+      - name: Conformance
+        run: |
+          bin=$(find recipes/${{ matrix.recipe }}/out -type f -perm -u+x | head -1)
+          NANOVM_WASM=nano.min.wasm \
+            node tools/nano-conformance.mjs "$bin" --recipe recipes/${{ matrix.recipe }} --report verdict.json
+          NANOVM_WASM=nano.trace.wasm \
+            node tools/nano-conformance.mjs "$bin" --recipe recipes/${{ matrix.recipe }} --trace --merge verdict.json
+          node tools/gate.mjs verdict.json nano-syscalls.json --recipe recipes/${{ matrix.recipe }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.recipe }}
+          path: |
+            recipes/${{ matrix.recipe }}/out/**
+            verdict.json
+
+  publish:
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, registry-url: "https://registry.npmjs.org" }
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }   # each recipe lands in artifacts/build-<recipe>/
+
+      # [4] Package: strip, gzip, chunk, hash, sign
+      - name: Package
+        env:
+          CATALOG_SIGNING_KEY: ${{ secrets.CATALOG_ED25519_PRIVATE_KEY }}
+        run: node tools/package.mjs artifacts --out dist --recipes recipes
+
+      # [5] Publish: push chunks + index to npm (-> jsDelivr), bump generation.
+      # Without NPM_TOKEN this runs as a dry-run (assembles dist/npm, pushes nothing).
+      - name: Publish
+        env:
+          CATALOG_SIGNING_KEY: ${{ secrets.CATALOG_ED25519_PRIVATE_KEY }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node tools/publish.mjs dist
+
+      # Optional R2 mirror for oversize artifacts (fallback path).
+      - name: Mirror to R2
+        if: ${{ env.R2_BUCKET != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: node tools/mirror-r2.mjs dist

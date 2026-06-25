@@ -1,0 +1,18 @@
+name = "ripgrep"
+version = "14.1.0"
+abi = "riscv64gc-linux-musl"
+
+# The spec's running example: a Rust app. The musl target links static by default,
+# so the produced binary is a fully static RV64GC ELF.
+
+[source]
+git = "https://github.com/BurntSushi/ripgrep"
+rev = "14.1.0"
+
+[entrypoint]
+argv = ["rg"]
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
