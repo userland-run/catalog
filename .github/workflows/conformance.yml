@@ -88,7 +88,10 @@ jobs:
 
   report:
     needs: conformance
-    if: github.ref == 'refs/heads/main'
+    # Publish whatever recipes DID conform, even if another recipe's build failed
+    # (e.g. ripgrep's jemalloc cross-compile). A broken recipe just stays untested
+    # on the dashboard instead of blocking the rest.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
