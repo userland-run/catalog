@@ -9,7 +9,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-rustup target add riscv64gc-unknown-linux-musl
 command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/null 2>&1 || cargo install cargo-zigbuild
 
 # Synthesize a minimal crate around our single source file.

@@ -57,11 +57,14 @@ cd "$(dirname "$0")"
 REPO="${repo}"
 REV="${rev}"
 
-rustup target add riscv64gc-unknown-linux-musl
 command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/null 2>&1 || cargo install cargo-zigbuild
 
 rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
 cd .src
+# Add the musl target to whatever toolchain the repo PINS (rust-toolchain.toml),
+# not just the default — otherwise a pinned toolchain has no riscv64 musl std and
+# the build dies with E0463 "can't find crate for \`core\`".
+rustup target add riscv64gc-unknown-linux-musl
 cargo zigbuild --release --target riscv64gc-unknown-linux-musl ${sel}
 cd ..
 mkdir -p out
