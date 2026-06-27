@@ -29,3 +29,5 @@ contact = "https://github.com/userland-run/catalog"
 
 [status]
 features = ["catalog.recipe.nfetch"]
+
+# retry capture: B3 net-fixtures now available
