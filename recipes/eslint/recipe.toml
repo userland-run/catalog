@@ -1,0 +1,20 @@
+name = "eslint"
+version = "10.0.0"
+abi = "riscv64gc-linux-musl"
+
+# ESLint — a multi-file catalog app that runs ON node (install the `node` recipe
+# too). Its node_modules tree installs under /usr/local/lib and a
+# /usr/local/bin/eslint wrapper execs it. Conformed via `eslint --version` on node.
+multifile = true
+runner = "node"
+
+[entrypoint]
+argv = ["eslint"]
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.eslint"]

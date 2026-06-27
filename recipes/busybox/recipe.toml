@@ -23,3 +23,5 @@ contact = "https://github.com/userland-run/catalog"
 
 [status]
 features = ["catalog.recipe.busybox"]
+
+# (catalog migration: busybox distributed via the catalog)

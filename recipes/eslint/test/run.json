@@ -1,0 +1,12 @@
+{
+  "cmd": ["node", "/usr/local/lib/node_modules/eslint/bin/eslint.js", "--version"],
+  "env": {},
+  "load": [],
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "4a87dad258d4e9acb58e4a46e78d64a74d2f530303978636e90f48cf5e19403e",
+    "maxInstructions": 8000000000,
+    "maxWallMs": 180000
+  },
+  "ramMb": 1800
+}

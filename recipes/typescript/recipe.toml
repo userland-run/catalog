@@ -1,0 +1,21 @@
+name = "typescript"
+version = "5.9.3"
+abi = "riscv64gc-linux-musl"
+
+# The TypeScript compiler — a multi-file catalog app that runs ON node (install
+# the `node` recipe too). Its node_modules tree installs under /usr/local/lib and
+# a /usr/local/bin/tsc wrapper execs it. Conformed by running `tsc --version` on
+# node with the tree staged (runner = "node").
+multifile = true
+runner = "node"
+
+[entrypoint]
+argv = ["tsc"]
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.typescript"]

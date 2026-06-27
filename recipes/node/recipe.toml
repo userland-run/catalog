@@ -22,3 +22,5 @@ contact = "https://github.com/userland-run/catalog"
 
 [status]
 features = ["catalog.recipe.node"]
+
+# (catalog migration: node distributed via the catalog)

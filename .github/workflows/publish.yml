@@ -62,10 +62,14 @@ jobs:
       - name: Build
         run: bash recipes/${{ matrix.recipe }}/build.sh
 
-      # [2] Validate (static / RV64GC / no unsupported extensions)
+      # [2] Validate (static / RV64GC / no unsupported extensions). Multi-file
+      # recipes (e.g. typescript) have no single ELF — they run on the `node`
+      # recipe — so skip ELF validation for them.
       - name: Validate ELF
         run: |
-          bin=$(find recipes/${{ matrix.recipe }}/out -type f -perm -u+x | head -1)
+          r=recipes/${{ matrix.recipe }}
+          if grep -q 'multifile *= *true' "$r/recipe.toml"; then echo "multifile recipe — skip ELF validation"; exit 0; fi
+          bin=$(find "$r/out" -type f -perm -u+x | head -1)
           echo "binary: $bin"
           tools/validate-elf.sh "$bin"
 
@@ -80,15 +84,23 @@ jobs:
             echo "::error::tools/nano-syscalls.json is out of sync with nano $NANO_VERSION — re-pin it"; exit 1
           fi
 
-      # [3] Conformance on real nano: plain (golden) then trace (syscall coverage), then gate.
+      # [3] Conformance on real nano: plain (golden) then trace (syscall coverage),
+      # then gate. A `runner = "node"` recipe is conformed by loading the node ELF
+      # (the candidate) and staging the recipe's tree with --tree (so e.g. tsc runs).
       - name: Conformance
         run: |
-          bin=$(find recipes/${{ matrix.recipe }}/out -type f -perm -u+x | head -1)
+          r=recipes/${{ matrix.recipe }}
+          if grep -q 'runner *= *"node"' "$r/recipe.toml"; then
+            curl -fsSL "$NANO_RELEASE/node" -o node-runtime
+            bin=node-runtime; tree="--tree $r/out"
+          else
+            bin=$(find "$r/out" -type f -perm -u+x | head -1); tree=""
+          fi
           NANOVM_WASM=nano.min.wasm \
-            node tools/nano-conformance.mjs "$bin" --recipe recipes/${{ matrix.recipe }} --report verdict.json
+            node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --report verdict.json
           NANOVM_WASM=nano.trace.wasm \
-            node tools/nano-conformance.mjs "$bin" --recipe recipes/${{ matrix.recipe }} --trace --merge verdict.json
-          node tools/gate.mjs verdict.json nano-syscalls.json --recipe recipes/${{ matrix.recipe }}
+            node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --trace --merge verdict.json
+          node tools/gate.mjs verdict.json nano-syscalls.json --recipe "$r"
 
       - uses: actions/upload-artifact@v4
         with:

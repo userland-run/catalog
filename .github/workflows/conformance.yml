@@ -62,14 +62,21 @@ jobs:
           curl -fsSL "$NANO_RELEASE/nano.trace.wasm" -o nano.trace.wasm
 
       # [2] Conformance on real nano: plain (golden) then trace (syscall coverage).
+      # `runner = "node"` recipes load the node ELF + stage their tree (--tree).
       - name: Conformance
         run: |
-          bin=$(find recipes/${{ matrix.recipe }}/out -type f -perm -u+x | head -1)
-          echo "binary: $bin"
+          r=recipes/${{ matrix.recipe }}
+          if grep -q 'runner *= *"node"' "$r/recipe.toml"; then
+            curl -fsSL "$NANO_RELEASE/node" -o node-runtime
+            bin=node-runtime; tree="--tree $r/out"
+          else
+            bin=$(find "$r/out" -type f -perm -u+x | head -1); tree=""
+          fi
+          echo "binary: $bin $tree"
           NANOVM_WASM=nano.min.wasm \
-            node tools/nano-conformance.mjs "$bin" --recipe recipes/${{ matrix.recipe }} --report verdict.json
+            node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --report verdict.json
           NANOVM_WASM=nano.trace.wasm \
-            node tools/nano-conformance.mjs "$bin" --recipe recipes/${{ matrix.recipe }} --trace --merge verdict.json
+            node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --trace --merge verdict.json
 
       # [3] Map the verdict → one contract result (the gate decides passed/failed;
       # a gate rejection is recorded as status "failed", it does not fail the job).
