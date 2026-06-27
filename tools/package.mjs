@@ -21,10 +21,10 @@
 //   env CATALOG_SIGNING_KEY (or CATALOG_ED25519_PRIVATE_KEY): base64 PKCS8 / PEM
 //   env NANO_VERSION: pinned nano runtime version (default from nano-syscalls.json)
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, lstatSync, readlinkSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { execFileSync } from "node:child_process";
-import { resolve, dirname, basename } from "node:path";
+import { resolve, dirname, basename, relative, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseToml } from "./lib/toml.mjs";
 import { chunk } from "./lib/fastcdc.mjs";
@@ -72,6 +72,29 @@ function writeCas(bytes) {
   return sha;
 }
 
+const isElf = (b) => b.length >= 4 && b[0] === 0x7f && b[1] === 0x45 && b[2] === 0x4c && b[3] === 0x46;
+
+// Package one file → a manifest `files[]` entry (strip if ELF, gzip, FastCDC-chunk).
+function packageFile(absPath, installPath, mode) {
+  const raw = readFileSync(absPath);
+  const bytes = isElf(raw) ? tryStrip(raw).bytes : raw;
+  const gz = gzipSync(bytes, { level: 9 });
+  const chunks = chunk(gz).map((r) => writeCas(gz.subarray(r.start, r.end)));
+  return { path: installPath, mode, compression: "gzip", size: bytes.length, sha256: sha256hex(gz), chunks, _gz: gz.length };
+}
+
+// Recursively list regular files under a directory (symlinks skipped — the
+// manifest has no symlink type yet; devenv's tools run via regular wrapper scripts).
+function* walkFiles(root, base = root) {
+  for (const name of readdirSync(root)) {
+    const p = join(root, name);
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) { console.error(`  skip symlink ${relative(base, p)} → ${readlinkSync(p)}`); continue; }
+    if (st.isDirectory()) { yield* walkFiles(p, base); continue; }
+    if (st.isFile()) yield { abs: p, rel: relative(base, p), mode: "0" + (st.mode & 0o777).toString(8) };
+  }
+}
+
 // Find a recipe's built binary + verdict in the artifacts tree.
 function findBuild(artifactDir) {
   const verdictPath = resolve(artifactDir, "verdict.json");
@@ -98,39 +121,35 @@ for (const dir of buildDirs) {
   const recipeName = basename(dir).replace(/^build-/, "");
   const recipeTomlPath = resolve(recipesDir, recipeName, "recipe.toml");
   if (!existsSync(recipeTomlPath)) { console.error(`skip ${recipeName}: no recipe.toml`); continue; }
-  const { binary, verdictPath } = findBuild(dir);
-  if (!binary) { console.error(`skip ${recipeName}: no binary in out/`); continue; }
-  if (!verdictPath) { console.error(`skip ${recipeName}: no verdict.json`); continue; }
-
   const recipe = parseToml(readFileSync(recipeTomlPath, "utf8"));
+  const { binary, verdictPath } = findBuild(dir);
+  if (!verdictPath) { console.error(`skip ${recipeName}: no verdict.json`); continue; }
+  if (!recipe.multifile && !binary) { console.error(`skip ${recipeName}: no binary in out/`); continue; }
+
   const verdict = JSON.parse(readFileSync(verdictPath, "utf8"));
 
-  const raw = readFileSync(binary);
-  const stripped = tryStrip(raw);
-  const gz = gzipSync(stripped.bytes, { level: 9 });
-
-  // FastCDC chunk the gzip stream → cas blobs.
-  const ranges = chunk(gz);
-  const chunkShas = ranges.map((r) => writeCas(gz.subarray(r.start, r.end)));
-
-  const installPath = recipe.entrypoint?.path
-    || `/usr/bin/${(recipe.entrypoint?.argv && recipe.entrypoint.argv[0]) || recipeName}`;
-
-  const fileEntry = {
-    path: installPath,
-    mode: "0755",
-    compression: "gzip",
-    size: stripped.bytes.length,        // decompressed size the guest sees
-    sha256: sha256hex(gz),              // hash of the stored (gzipped) object = concat of chunks
-    chunks: chunkShas,
-  };
+  // Single-binary recipe → one file at its install path. Multi-file recipe
+  // (e.g. devenv) → walk out/ as a guest-FS-rooted tree (out/usr/bin/node →
+  // /usr/bin/node), one files[] entry per file, lazily installable per-file.
+  const outRoot = resolve(dir, "out");
+  let files;
+  if (recipe.multifile) {
+    files = [...walkFiles(outRoot)].map((f) => packageFile(f.abs, "/" + f.rel, f.mode));
+  } else {
+    const installPath = recipe.entrypoint?.path
+      || `/usr/bin/${(recipe.entrypoint?.argv && recipe.entrypoint.argv[0]) || recipeName}`;
+    files = [packageFile(binary, installPath, "0755")];
+  }
+  const totalGz = files.reduce((s, f) => s + f._gz, 0);
+  const totalChunks = files.reduce((s, f) => s + f.chunks.length, 0);
+  files.forEach((f) => delete f._gz);
 
   const manifestCore = {
     name: recipe.name || recipeName,
     version: String(recipe.version ?? "0.0.0"),
     abi: recipe.abi || "riscv64gc-linux-musl",
     entrypoint: { argv: recipe.entrypoint?.argv || [recipeName], env: recipe.entrypoint?.env || {} },
-    files: [fileEntry],
+    files,
     conformance: {
       nano_min_version: nanoVersion,
       syscalls_used: Object.keys(verdict.syscalls || {}).map(Number).sort((a, b) => a - b),
@@ -138,15 +157,15 @@ for (const dir of buildDirs) {
       instructions: verdict.instructions,
       tested: true,
     },
-    size: gz.length,                    // total transferred (compressed) bytes
+    size: totalGz,                      // total transferred (compressed) bytes
   };
 
   const { manifest, bytes } = finalizeManifest(manifestCore, privateKey);
   const manifestSha = writeCas(bytes);  // signed manifest stored as a cas blob
 
   records.push({ name: manifest.name, version: manifest.version, manifestSha, size: manifest.size });
-  console.error(`packaged ${manifest.name}@${manifest.version}: ${chunkShas.length} chunk(s), ` +
-    `gz ${(gz.length / 1024 / 1024).toFixed(2)}MB, strip=${stripped.tool || "skipped"}, manifest ${manifestSha.slice(0, 12)}…`);
+  console.error(`packaged ${manifest.name}@${manifest.version}: ${files.length} file(s), ${totalChunks} chunk(s), ` +
+    `gz ${(totalGz / 1024 / 1024).toFixed(2)}MB, manifest ${manifestSha.slice(0, 12)}…`);
 }
 
 writeFileSync(resolve(outDir, "manifests.json"), JSON.stringify(records, null, 2) + "\n");
