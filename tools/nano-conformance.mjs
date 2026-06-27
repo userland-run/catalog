@@ -53,7 +53,7 @@ const FD_TYPE_NONE = 0, FD_TYPE_STDIN = 1, FD_TYPE_STDERR = 3, FD_TYPE_FILE = 4,
 // FS_PENDING syscall numbers (RISC-V Linux)
 const SYS_GETCWD = 17, SYS_MKDIRAT = 34, SYS_UNLINKAT = 35, SYS_FACCESSAT = 48,
       SYS_OPENAT = 56, SYS_CLOSE = 57, SYS_GETDENTS64 = 61, SYS_LSEEK = 62,
-      SYS_READ = 63, SYS_WRITE = 64, SYS_PREAD64 = 67, SYS_PREADV = 69,
+      SYS_READ = 63, SYS_WRITE = 64, SYS_PREAD64 = 67, SYS_PWRITE64 = 68, SYS_PREADV = 69, SYS_PWRITEV = 70,
       SYS_READLINKAT = 78, SYS_NEWFSTATAT = 79, SYS_FSTAT = 80,
       SYS_UTIMENSAT = 88, SYS_RENAMEAT2 = 276, SYS_STATX = 291;
 
@@ -399,6 +399,13 @@ function processFsRequest(X, dv, memory, ramPtr, vmPtr, memfs) {
       const fe = fdRead(gfd);
       if (fe.fd_type !== FD_TYPE_FILE) { result = -9; break; }
       result = memfs.pread(fe.host_fd, memory, ramPtr + bufPtr, bufLen || arg1, arg2); break;
+    }
+    case SYS_PWRITE64:
+    case SYS_PWRITEV: {                       // positional write — explicit offset, FD cursor untouched
+      if (gfd < 0 || gfd >= MAX_FDS) { result = -9; break; }
+      const fe = fdRead(gfd);
+      if (fe.fd_type !== FD_TYPE_FILE) { result = -9; break; }
+      result = memfs.pwrite(fe.host_fd, memory, ramPtr + bufPtr, bufLen || arg1, arg2); break;
     }
     case SYS_WRITE: {
       if (gfd < 0 || gfd >= MAX_FDS) { result = -9; break; }

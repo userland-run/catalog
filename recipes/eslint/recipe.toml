@@ -18,3 +18,5 @@ contact = "https://github.com/userland-run/catalog"
 
 [status]
 features = ["catalog.recipe.eslint"]
+
+# republish: conforms after nano pwrite64/flush_icache/io_uring support
