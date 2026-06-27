@@ -152,12 +152,22 @@ for (const dir of buildDirs) {
   const totalChunks = files.reduce((s, f) => s + f.chunks.length, 0);
   files.forEach((f) => delete f._gz);
 
+  // Marketplace metadata: topic facets (for bottling/browse) + caveat flags
+  // (net/mp/big/tty) the spec defines. Carried into the signed manifest so the
+  // client and the bundle grouper can read them without the recipe.
+  const topics = Array.isArray(recipe.bundle?.topics) ? recipe.bundle.topics.map(String) : [];
+  const caveats = recipe.caveats && typeof recipe.caveats === "object"
+    ? Object.entries(recipe.caveats).filter(([, v]) => v === true).map(([k]) => k).sort()
+    : [];
+
   const manifestCore = {
     name: recipe.name || recipeName,
     version: String(recipe.version ?? "0.0.0"),
     abi: recipe.abi || "riscv64gc-linux-musl",
     entrypoint: { argv: recipe.entrypoint?.argv || [recipeName], env: recipe.entrypoint?.env || {} },
     files,
+    ...(topics.length ? { topics } : {}),
+    ...(caveats.length ? { caveats } : {}),
     conformance: {
       nano_min_version: nanoVersion,
       syscalls_used: Object.keys(verdict.syscalls || {}).map(Number).sort((a, b) => a - b),
