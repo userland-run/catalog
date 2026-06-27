@@ -1,0 +1,21 @@
+name = "oxipng"
+version = "10.1.1"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/shssoichiro/oxipng"
+rev = "v10.1.1"
+
+[entrypoint]
+argv = ["oxipng"]
+env = { }
+
+[bundle]
+topics = ["Images"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.oxipng"]

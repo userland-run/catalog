@@ -1,0 +1,21 @@
+name = "delta"
+version = "0.19.2"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/dandavison/delta"
+rev = "0.19.2"
+
+[entrypoint]
+argv = ["delta"]
+env = { }
+
+[bundle]
+topics = ["Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.delta"]

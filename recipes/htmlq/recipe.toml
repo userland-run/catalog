@@ -1,0 +1,21 @@
+name = "htmlq"
+version = "0.4.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/mgdm/htmlq"
+rev = "v0.4.0"
+
+[entrypoint]
+argv = ["htmlq"]
+env = { }
+
+[bundle]
+topics = ["Text", "Data"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.htmlq"]

@@ -1,0 +1,21 @@
+name = "gron"
+version = "0.7.1"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/tomnomnom/gron"
+rev = "v0.7.1"
+
+[entrypoint]
+argv = ["gron"]
+env = { }
+
+[bundle]
+topics = ["Text", "Data"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.gron"]

@@ -1,0 +1,21 @@
+name = "dasel"
+version = "3.11.1"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/TomWright/dasel"
+rev = "v3.11.1"
+
+[entrypoint]
+argv = ["dasel"]
+env = { }
+
+[bundle]
+topics = ["Data", "Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.dasel"]

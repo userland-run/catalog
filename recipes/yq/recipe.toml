@@ -1,0 +1,21 @@
+name = "yq"
+version = "4.53.3"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/mikefarah/yq"
+rev = "v4.53.3"
+
+[entrypoint]
+argv = ["yq"]
+env = { }
+
+[bundle]
+topics = ["Data", "Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.yq"]

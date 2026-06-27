@@ -1,0 +1,21 @@
+name = "glow"
+version = "2.1.2"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/charmbracelet/glow"
+rev = "v2.1.2"
+
+[entrypoint]
+argv = ["glow"]
+env = { }
+
+[bundle]
+topics = ["Markup", "Documents"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.glow"]

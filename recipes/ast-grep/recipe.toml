@@ -1,0 +1,21 @@
+name = "ast-grep"
+version = "0.44.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/ast-grep/ast-grep"
+rev = "0.44.0"
+
+[entrypoint]
+argv = ["ast-grep"]
+env = { }
+
+[bundle]
+topics = ["Text", "Search"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.ast-grep"]
