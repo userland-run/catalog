@@ -38,6 +38,7 @@ jobs:
           if ! git rev-parse "$BASE" >/dev/null 2>&1; then range="$HEAD"; fi  # first push / shallow
           ready=""
           for name in $(git diff --name-only $range -- 'recipes/' | sed -n 's#^recipes/\([^/]*\)/.*#\1#p' | sort -u); do
+            case "$name" in _*) echo "skip $name: internal test recipe (not published)"; continue;; esac
             rj="recipes/$name/test/run.json"
             if [ -f "$rj" ] && grep -q '"stdoutSha256": *"TBD"' "$rj"; then
               echo "skip $name: golden not captured yet (TBD)"; continue

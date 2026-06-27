@@ -127,6 +127,9 @@ const buildDirs = existsSync(artifactsDir)
 for (const dir of buildDirs) {
   // artifact dir name is "build-<recipe>"
   const recipeName = basename(dir).replace(/^build-/, "");
+  // `_`-prefixed recipes are internal conformance smoke tests — conformed for the
+  // status hub, but never packaged into the public catalog.
+  if (recipeName.startsWith("_")) { console.error(`skip ${recipeName}: internal test recipe`); continue; }
   const recipeTomlPath = resolve(recipesDir, recipeName, "recipe.toml");
   if (!existsSync(recipeTomlPath)) { console.error(`skip ${recipeName}: no recipe.toml`); continue; }
   const recipe = parseToml(readFileSync(recipeTomlPath, "utf8"));
