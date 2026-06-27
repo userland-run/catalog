@@ -8,8 +8,8 @@
   },
   "load": [],
   "expect": {
-    "exitCode": 0,
-    "stdoutSha256": "TBD",
+    "exitCode": 2,
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "maxInstructions": 2000000000,
     "maxWallMs": 30000
   }
