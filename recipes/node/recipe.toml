@@ -24,3 +24,5 @@ contact = "https://github.com/userland-run/catalog"
 features = ["catalog.recipe.node"]
 
 # (catalog migration: node distributed via the catalog)
+
+# republish: ICU node available (prettier unblocked)

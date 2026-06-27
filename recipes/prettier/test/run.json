@@ -1,0 +1,16 @@
+{
+  "cmd": [
+    "node",
+    "/usr/local/lib/node_modules/prettier/bin/prettier.cjs",
+    "--version"
+  ],
+  "env": {},
+  "load": [],
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "TBD",
+    "maxInstructions": 8000000000,
+    "maxWallMs": 180000
+  },
+  "ramMb": 1800
+}
