@@ -1,0 +1,5 @@
+# Cloudflare Worker config for the nano Tier-1.5 CORS proxy.
+# Deploy:  npx wrangler deploy   (from this directory, after `wrangler login`)
+name = "nano-cors-proxy"
+main = "worker.js"
+compatibility_date = "2026-06-01"
