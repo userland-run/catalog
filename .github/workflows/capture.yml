@@ -25,7 +25,13 @@ jobs:
   capture:
     runs-on: ubuntu-latest
     steps:
+      # Push the golden commit with a PAT (secret CATALOG_PUSH_TOKEN) when set, so
+      # the commit TRIGGERS publish.yml — GitHub does not run workflows for commits
+      # pushed by the default GITHUB_TOKEN (loop-prevention). Without the PAT the
+      # goldens still land; publish must then be re-triggered manually.
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.CATALOG_PUSH_TOKEN || github.token }}
 
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: riscv64gc-unknown-linux-musl }
