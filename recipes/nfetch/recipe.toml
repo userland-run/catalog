@@ -1,0 +1,31 @@
+name = "nfetch"
+version = "0.1.0"
+abi = "riscv64gc-linux-musl"
+
+# A tiny self-contained HTTP client for the nano network bridge. It opens the
+# host-brokered fetch device /dev/__net__ (O_RDWR), writes "<METHOD> <URL>\n\n",
+# reads the HTTP/1.1 response the host frames back, and prints the body to
+# stdout (`-i` keeps the headers). The source lives in this recipe — no external
+# fetch — so the build path is just src/main.rs → static riscv64gc-musl ELF.
+
+[source]
+path = "src/main.rs"
+
+[entrypoint]
+argv = ["nfetch"]
+env = { }
+
+[bundle]
+topics = ["Networking"]
+
+# Needs the network bridge (/dev/__net__) at runtime — surfaced to the
+# marketplace/client as a capability flag.
+[caveats]
+net = true
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.nfetch"]
