@@ -18,6 +18,11 @@ cd .src
 # carries the riscv64gc-unknown-linux-musl std.
 rm -f rust-toolchain.toml rust-toolchain
 rustup target add riscv64gc-unknown-linux-musl
+# jemalloc-sys links libatomic on riscv64, which zig/musl don't provide as a
+# standalone -latomic, so the final link fails. jemalloc is only a perf tweak;
+# exclude it on riscv64 (extend its cfg) so difftastic uses the system allocator
+# and the -latomic dependency disappears.
+sed -i 's/target_os = "freebsd")))/target_os = "freebsd", target_arch = "riscv64")))/g' Cargo.toml src/main.rs
 cargo zigbuild --release --target riscv64gc-unknown-linux-musl --bin difft
 cd ..
 mkdir -p out

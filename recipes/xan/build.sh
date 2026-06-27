@@ -18,6 +18,12 @@ cd .src
 # carries the riscv64gc-unknown-linux-musl std.
 rm -f rust-toolchain.toml rust-toolchain
 rustup target add riscv64gc-unknown-linux-musl
+# jemalloc-sys is pulled in only for 64-bit musl, but it can't cross-compile
+# here: its bundled autoconf config.sub rejects the riscv64gc-* triple. jemalloc
+# is only a musl perf tweak, so drop the dep + the #[global_allocator] and fall
+# back to the system allocator.
+sed -i '/jemallocator = /d' Cargo.toml
+sed -i '/#\[global_allocator\]/d; /jemallocator::Jemalloc/d' src/main.rs
 cargo zigbuild --release --target riscv64gc-unknown-linux-musl --bin xan
 cd ..
 mkdir -p out
