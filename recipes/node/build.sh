@@ -27,3 +27,5 @@ fi
 
 chmod +x out/node
 file out/node
+
+# publish trigger: catalog migration

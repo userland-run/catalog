@@ -50,10 +50,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Toolchains: Rust RV64GC musl target + zig (for C/C++) + node.
+      # Toolchains: Rust RV64GC musl target + zig (for C/C++) + node. zig is only
+      # needed by C/C++ recipes; its download is occasionally flaky, so don't let a
+      # transient zig failure block prebuilt/npm recipes (busybox, node, the tools).
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: riscv64gc-unknown-linux-musl }
       - uses: goto-bus-stop/setup-zig@v2
+        continue-on-error: true
         with: { version: 0.13.0 }
       - uses: actions/setup-node@v4
         with: { node-version: 20 }

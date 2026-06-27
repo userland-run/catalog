@@ -26,3 +26,5 @@ fi
 
 chmod +x out/busybox
 file out/busybox
+
+# publish trigger: catalog migration

@@ -47,6 +47,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: riscv64gc-unknown-linux-musl }
       - uses: goto-bus-stop/setup-zig@v2
+        continue-on-error: true   # zig (C/C++ recipes only) download is flaky; don't block prebuilt/npm recipes
         with: { version: 0.13.0 }
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
