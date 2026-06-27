@@ -11,8 +11,11 @@ command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/n
 
 rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
 cd .src
-# add the musl target to the repo-PINNED toolchain (rust-toolchain.toml), else E0463
 rustup target add riscv64gc-unknown-linux-musl
+# Cargo.lock pins libc 0.2.101 (2021), which predates riscv64-musl support and
+# fails to compile against it (707 errors: cannot find type `c_char`/`__u64`…).
+# Bump just libc to a riscv64-aware 0.2.x; the rest of the (old) lockfile stays put.
+cargo update -p libc
 cargo zigbuild --release --target riscv64gc-unknown-linux-musl
 cd ..
 mkdir -p out
