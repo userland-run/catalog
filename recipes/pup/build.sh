@@ -9,6 +9,10 @@ REV="v0.4.0"
 rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
 cd .src
 mkdir -p ../out
+# pup v0.4.0 predates Go modules (GOPATH era) — `go build` fails "cannot find
+# main module". Initialise a module and pull its single dep (golang.org/x/net/html).
+go mod init github.com/ericchiang/pup
+go mod tidy
 GOOS=linux GOARCH=riscv64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ../out/pup .
 cd ..
 file out/pup
