@@ -18,3 +18,5 @@ contact = "https://github.com/userland-run/catalog"
 
 [status]
 features = ["catalog.recipe.prettier"]
+
+# publish (ICU node landed; conforms)
