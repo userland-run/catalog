@@ -90,5 +90,8 @@ jobs:
             # No [skip ci]: the golden commit must trigger publish.yml (now with a
             # real golden). capture.yml re-fires too but finds no TBD → no-op.
             git commit -m "ci: capture conformance goldens"
-            git push
+            # Concurrent capture/recipe pushes can race; rebase + retry the push.
+            for i in 1 2 3 4 5; do
+              git pull --rebase --autostash origin main && git push && break || sleep $((i*5))
+            done
           fi
