@@ -16,7 +16,7 @@
   ],
   "expect": {
     "exitCode": 0,
-    "stdoutSha256": "TBD",
+    "stdoutSha256": "ea8fac7c65fb589b0d53560f5251f74f9e9b243478dcb6b3ea79b5e36449c8d9",
     "maxInstructions": 2000000000,
     "maxWallMs": 30000
   }
