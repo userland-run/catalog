@@ -1,0 +1,24 @@
+name = "gix"
+version = "0.55.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/GitoxideLabs/gitoxide"
+rev = "v0.55.0"
+
+[entrypoint]
+argv = ["gix"]
+env = { }
+
+[bundle]
+topics = ["Version Control"]
+
+[caveats]
+net = true
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.gix"]
