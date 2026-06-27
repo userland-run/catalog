@@ -1,0 +1,12 @@
+{
+  "cmd": ["node", "--version"],
+  "env": {},
+  "load": [],
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "e17186780013ef7a6b84a3522ded31b41d076c9bb2e8856f5e0b0819416f1069",
+    "maxInstructions": 4000000000,
+    "maxWallMs": 120000
+  },
+  "ramMb": 1800
+}

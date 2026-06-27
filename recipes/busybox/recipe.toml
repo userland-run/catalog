@@ -1,0 +1,25 @@
+name = "busybox"
+version = "1.36.1"
+abi = "riscv64gc-linux-musl"
+
+# BusyBox — the multi-call coreutils + ash shell guest. Distributed through the
+# catalog so the emulator core no longer has to embed it. The single /bin/busybox
+# binary provides every applet; the boot path runs `busybox --install -s` to create
+# the applet symlinks (/bin/sh, /bin/ls, …) in the guest after install.
+
+[source]
+# The prebuilt static RV64GC BusyBox. build.sh sources it (see the script); a
+# from-source build is a follow-up.
+prebuilt = true
+
+[entrypoint]
+argv = ["busybox"]
+path = "/bin/busybox"
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.busybox"]

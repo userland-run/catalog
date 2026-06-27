@@ -1,0 +1,12 @@
+{
+  "cmd": ["busybox", "echo", "userland"],
+  "env": {},
+  "load": [],
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "aec26d77667be59247ac398e8fb9f6497c957c8d93f0c022b3a2084c772eb1bd",
+    "maxInstructions": 50000000,
+    "maxWallMs": 10000
+  },
+  "ramMb": 256
+}

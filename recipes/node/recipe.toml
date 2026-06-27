@@ -1,0 +1,23 @@
+name = "node"
+version = "25.4.0"
+abi = "riscv64gc-linux-musl"
+
+# Node.js v25 — the JavaScript runtime guest. ~52 MB; distributed through the
+# catalog and installed lazily (chunks fetched on first guest open) so the
+# emulator core stays small. The devenv toolchain (tsc/eslint/prettier) is a
+# separate multi-file recipe that runs on this node.
+
+[source]
+prebuilt = true
+
+[entrypoint]
+argv = ["node"]
+path = "/usr/bin/node"
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.node"]
