@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-UEL
 # Copyright (C) 2026 And The Next GmbH - https://userland.run
 #
-# Bootstrap a new recipe's conformance golden in CI. A scaffolded recipe ships
+# Bootstrap new recipes' conformance goldens in CI. A scaffolded recipe ships
 # test/run.json with "stdoutSha256": "TBD"; the cross-compile toolchain lives in
-# CI, so this builds each TBD recipe, captures the golden against the released
-# nano runtime (tools/capture-golden.mjs), and commits run.json back. The normal
-# publish.yml then ENFORCES that golden. This lets recipes be added without a
-# local riscv64-musl toolchain: scaffold (new-recipe.mjs) → push → CI captures.
+# CI, so this builds each TBD recipe IN PARALLEL (one runner per recipe), captures
+# the golden against the released nano runtime (tools/capture-golden.mjs), and
+# commits the run.jsons back in one collected commit. publish.yml then ENFORCES
+# them. Adding tools is: scaffold (new-recipe.mjs) → push → CI captures + publishes.
 name: capture-goldens
 
 on:
@@ -22,17 +22,37 @@ env:
   NANO_RELEASE: https://github.com/userland-run/nano/releases/download/v0.1.0
 
 jobs:
-  capture:
+  # Emit the JSON array of recipes whose golden is still TBD.
+  detect:
     runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.d.outputs.recipes }}
     steps:
-      # Push the golden commit with a PAT (secret CATALOG_PUSH_TOKEN) when set, so
-      # the commit TRIGGERS publish.yml — GitHub does not run workflows for commits
-      # pushed by the default GITHUB_TOKEN (loop-prevention). Without the PAT the
-      # goldens still land; publish must then be re-triggered manually.
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.CATALOG_PUSH_TOKEN || github.token }}
+      - id: d
+        run: |
+          ready=""
+          for dir in recipes/*/; do
+            name="$(basename "$dir")"; rj="$dir/test/run.json"
+            [ -f "$rj" ] || continue
+            grep -q '"stdoutSha256": *"TBD"' "$rj" || continue
+            ready="$ready$name"$'\n'
+          done
+          arr=$(printf "%s" "$ready" | sed '/^$/d' | jq -R . | jq -cs .)
+          echo "recipes=${arr:-[]}" >> "$GITHUB_OUTPUT"
+          echo "TBD recipes: ${arr:-[]}"
 
+  # One runner per TBD recipe: build + capture, upload the captured run.json.
+  capture:
+    needs: detect
+    if: needs.detect.outputs.recipes != '[]' && needs.detect.outputs.recipes != ''
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false   # one recipe failing must not cancel the others
+      matrix:
+        recipe: ${{ fromJSON(needs.detect.outputs.recipes) }}
+    steps:
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: riscv64gc-unknown-linux-musl }
       - name: Cache zig
@@ -55,42 +75,57 @@ jobs:
           curl -fsSL "$NANO_RELEASE/nano.min.wasm" -o nano.min.wasm
           curl -fsSL "$NANO_RELEASE/node"          -o node-runtime || true
 
-      - name: Build + capture goldens for TBD recipes
+      - name: Build + capture ${{ matrix.recipe }}
         id: cap
+        continue-on-error: true   # a build/capture failure leaves the golden TBD (loud, not fatal)
         run: |
-          captured=0
-          for d in recipes/*/; do
-            r="${d%/}"; name="$(basename "$r")"; rj="$r/test/run.json"
-            [ -f "$rj" ] || continue
-            grep -q '"stdoutSha256": *"TBD"' "$rj" || continue
-            echo "::group::capture $name"
-            if ! bash "$r/build.sh"; then echo "::warning::build failed: $name"; echo "::endgroup::"; continue; fi
-            if grep -q 'runner *= *"node"' "$r/recipe.toml"; then
-              NANOVM_WASM=nano.min.wasm node tools/capture-golden.mjs "$name" --bin node-runtime --tree "$r/out" \
-                || echo "::warning::capture failed: $name"
-            else
-              NANOVM_WASM=nano.min.wasm node tools/capture-golden.mjs "$name" \
-                || echo "::warning::capture failed: $name"
-            fi
-            captured=1
-            echo "::endgroup::"
-          done
-          echo "captured=$captured" >> "$GITHUB_OUTPUT"
+          r="recipes/${{ matrix.recipe }}"
+          bash "$r/build.sh"
+          if grep -q 'runner *= *"node"' "$r/recipe.toml"; then
+            NANOVM_WASM=nano.min.wasm node tools/capture-golden.mjs "${{ matrix.recipe }}" --bin node-runtime --tree "$r/out"
+          else
+            NANOVM_WASM=nano.min.wasm node tools/capture-golden.mjs "${{ matrix.recipe }}"
+          fi
 
-      - name: Commit captured goldens
-        if: steps.cap.outputs.captured == '1'
+      - name: Upload captured golden
+        if: steps.cap.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-${{ matrix.recipe }}
+          path: recipes/${{ matrix.recipe }}/test/run.json
+          if-no-files-found: ignore
+
+  # Collect every captured run.json and commit them once (no concurrent-push race).
+  # A PAT (CATALOG_PUSH_TOKEN) makes the commit trigger publish.yml; with the
+  # default GITHUB_TOKEN it lands but publish must be re-triggered manually.
+  commit:
+    needs: capture
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.CATALOG_PUSH_TOKEN || github.token }}
+      - uses: actions/download-artifact@v4
+        with: { path: /tmp/goldens, pattern: golden-* }
+        continue-on-error: true   # no captures → nothing to download
+      - name: Apply + commit captured goldens
         run: |
+          shopt -s nullglob
+          applied=0
+          for d in /tmp/goldens/golden-*/; do
+            recipe="$(basename "$d" | sed 's/^golden-//')"
+            [ -f "$d/run.json" ] || continue
+            cp "$d/run.json" "recipes/$recipe/test/run.json" && applied=1
+          done
+          if [ "$applied" != 1 ]; then echo "no goldens captured this run"; exit 0; fi
           git config user.name  "nano-catalog-bot"
           git config user.email "bot@userland.run"
-          # Only the run.json goldens; leave build artifacts (out/, .src) out.
           git add recipes/*/test/run.json
           if git diff --cached --quiet; then
             echo "no golden changes to commit"
           else
-            # No [skip ci]: the golden commit must trigger publish.yml (now with a
-            # real golden). capture.yml re-fires too but finds no TBD → no-op.
             git commit -m "ci: capture conformance goldens"
-            # Concurrent capture/recipe pushes can race; rebase + retry the push.
             for i in 1 2 3 4 5; do
               git pull --rebase --autostash origin main && git push && break || sleep $((i*5))
             done
