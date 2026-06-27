@@ -42,7 +42,13 @@ function splitSrc(src) {
   return { path: src };
 }
 
-const RUST = (repo, rev, bin) => `#!/usr/bin/env bash
+const RUST = (repo, rev, bin, pkg, features) => {
+  const sel = [
+    pkg ? `-p ${pkg}` : "",
+    `--bin ${bin}`,
+    features ? `--no-default-features --features ${features}` : "",
+  ].filter(Boolean).join(" ");
+  return `#!/usr/bin/env bash
 # Build ${bin} into ./out/${bin} as a static RV64GC musl ELF via cargo-zigbuild —
 # it drives the build through zig (bundles musl + a C cross-compiler) and handles
 # the musl/libgcc_s quirks that a raw "cargo build + zig linker" trips over.
@@ -56,12 +62,13 @@ command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/n
 
 rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
 cd .src
-cargo zigbuild --release --target riscv64gc-unknown-linux-musl
+cargo zigbuild --release --target riscv64gc-unknown-linux-musl SELECT
 cd ..
 mkdir -p out
 cp .src/target/riscv64gc-unknown-linux-musl/release/${bin} out/${bin}
 file out/${bin}
 `;
+};
 
 const GO = (repo, rev, bin, pkg) => `#!/usr/bin/env bash
 # Build ${bin} into ./out/${bin} as a static RV64GC ELF. CGO_ENABLED=0 makes a
@@ -166,7 +173,7 @@ function main() {
   mkdirSync(resolve(dir, "test"), { recursive: true });
 
   const build =
-    lang === "rust" ? RUST(src.git, src.rev, bin) :
+    lang === "rust" ? RUST(src.git, src.rev, bin, a.pkg, a.features) :
     lang === "go"   ? GO(src.git, src.rev, bin, a.pkg || ".") :
     lang === "c"    ? C(src, bin) :
     (() => { console.error(`unknown --lang ${lang} (rust|go|c)`); process.exit(2); })();
