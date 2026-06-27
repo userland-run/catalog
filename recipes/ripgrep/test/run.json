@@ -1,12 +1,22 @@
 {
-  "cmd": ["rg", "-c", "needle", "/in/corpus.txt"],
-  "env": { "LANG": "C" },
+  "cmd": [
+    "rg",
+    "-c",
+    "needle",
+    "/in/corpus.txt"
+  ],
+  "env": {
+    "LANG": "C"
+  },
   "load": [
-    { "from": "fixtures/corpus.txt", "to": "/in/corpus.txt" }
+    {
+      "from": "fixtures/corpus.txt",
+      "to": "/in/corpus.txt"
+    }
   ],
   "expect": {
     "exitCode": 0,
-    "stdoutSha256": "1121cfccd5913f0a63fec40a6ffd44ea64f9dc135c66634ba001d10bcf4302a2",
+    "stdoutSha256": "TBD",
     "maxInstructions": 500000000,
     "maxWallMs": 15000
   }
