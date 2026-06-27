@@ -11,7 +11,12 @@ command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/n
 
 rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
 cd .src
-# add the musl target to the repo-PINNED toolchain (rust-toolchain.toml), else E0463
+# The repo pins an exact toolchain (rust-toolchain.toml, profile=minimal). cargo
+# auto-installs THAT toolchain fresh, WITHOUT the riscv64-musl std, so a plain
+# `rustup target add` (which lands on stable) never applies → E0463 "can't find
+# crate for core". Drop the pin so the build runs on CI's stable, which already
+# carries the riscv64gc-unknown-linux-musl std.
+rm -f rust-toolchain.toml rust-toolchain
 rustup target add riscv64gc-unknown-linux-musl
 cargo zigbuild --release --target riscv64gc-unknown-linux-musl --bin ouch
 cd ..
