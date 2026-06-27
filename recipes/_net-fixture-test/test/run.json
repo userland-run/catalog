@@ -1,0 +1,24 @@
+{
+  "cmd": [
+    "busybox",
+    "head",
+    "-n",
+    "100",
+    "/dev/__net__"
+  ],
+  "env": {},
+  "load": [],
+  "net": [
+    {
+      "url": "*",
+      "response": "fixtures/response.bin"
+    }
+  ],
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "d779d6e5ce661aa13b8ec3705cfde993e8273758ed8e2b9d706bde2d590e074d",
+    "maxInstructions": 50000000,
+    "maxWallMs": 10000
+  },
+  "ramMb": 256
+}

@@ -1,0 +1,24 @@
+name = "_net-fixture-test"
+version = "1.0.0"
+abi = "riscv64gc-linux-musl"
+
+# Internal conformance smoke for the harness's NET record/replay (B3). NET tools
+# (curl/wget shims) talk to the host /dev/__net__ device; this recipe drives that
+# device with the busybox guest (`cat /dev/__net__`) and a recorded fixture, so
+# the response is deterministic and the golden is stable. No new app is shipped —
+# it reuses the busybox ELF (see build.sh).
+
+[source]
+prebuilt = true
+
+[entrypoint]
+argv = ["busybox", "head", "-n", "100", "/dev/__net__"]
+path = "/bin/busybox"
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.test.net-fixture"]

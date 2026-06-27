@@ -1,0 +1,18 @@
+{
+  "cmd": [
+    "busybox",
+    "head",
+    "-n",
+    "100"
+  ],
+  "env": {},
+  "load": [],
+  "stdin": "userland.run conformance: scripted stdin\nline two\nline three\n",
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "2ed50c74ccd515484981c72555fb1b7133342cc798010001b4fb7fd4d3524f15",
+    "maxInstructions": 50000000,
+    "maxWallMs": 10000
+  },
+  "ramMb": 256
+}

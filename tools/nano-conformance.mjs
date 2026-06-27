@@ -18,6 +18,19 @@
 // Verdict shape (spec §5.2):
 //   { loaded, exitCode, stdoutSha256, faulted, enosys,
 //     syscalls: { "<nr>": count, ... }, instructions, wallMs, peakRamMb }
+//
+// Two run.json knobs let otherwise-nondeterministic tools be conformed:
+//   "stdin": "<string>" | ["chunk", ...]   — seeds the guest's stdin so read(0)
+//        returns it (then EOF). Lets filter/interactive tools (fzf --filter, less)
+//        produce a stable golden.
+//   "net": [{ "url": "https://…", "response": "fixtures/resp.bin" }]  — record/replay
+//        for NET tools (curl/wget shims) that talk to the host /dev/__net__ device.
+//        Instead of a live fetch, the harness replays the recorded fixture bytes,
+//        framed as an HTTP/1.1 response, so NET tools golden-conform. The fixture
+//        path resolves like `load[].from` (relative to the recipe's test/ dir). A
+//        fixture that already begins with "HTTP/1.1 " is served verbatim; otherwise
+//        it is treated as the raw body and wrapped in a synthetic 200. A url of "*"
+//        is a catch-all; an unmatched url replays a deterministic 404.
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -54,8 +67,13 @@ const FD_TYPE_NONE = 0, FD_TYPE_STDIN = 1, FD_TYPE_STDERR = 3, FD_TYPE_FILE = 4,
 const SYS_GETCWD = 17, SYS_MKDIRAT = 34, SYS_UNLINKAT = 35, SYS_FACCESSAT = 48,
       SYS_OPENAT = 56, SYS_CLOSE = 57, SYS_GETDENTS64 = 61, SYS_LSEEK = 62,
       SYS_READ = 63, SYS_WRITE = 64, SYS_PREAD64 = 67, SYS_PWRITE64 = 68, SYS_PREADV = 69, SYS_PWRITEV = 70,
+      SYS_PPOLL = 73,
       SYS_READLINKAT = 78, SYS_NEWFSTATAT = 79, SYS_FSTAT = 80,
       SYS_UTIMENSAT = 88, SYS_RENAMEAT2 = 276, SYS_STATX = 291;
+
+// Seeded-stdin feed chunk: must stay <= the guest tty ring capacity (8192) so a
+// push into an empty ring never overflows/drops bytes.
+const STDIN_CHUNK = 4096;
 
 /**
  * Run one conformance pass.
@@ -123,8 +141,21 @@ export async function runPass({ wasmPath, elf, run, recipeDir, treeDir }) {
   const memfs = seedFs(RAM_SIZE, ramMb);
   // `load[].from` is relative to the recipe's test/ dir (where run.json lives),
   // matching the spec — e.g. "fixtures/corpus.txt".
-  loadFixtures(memfs, run.load || [], resolve(recipeDir, "test"));
+  const testDir = resolve(recipeDir, "test");
+  loadFixtures(memfs, run.load || [], testDir);
   if (treeDir) loadTree(memfs, treeDir);
+
+  // Deterministic I/O fixtures: seeded stdin (M1) and NET record/replay (B3).
+  const io = { stdin: buildStdin(run.stdin), net: buildNetState(run.net, testDir) };
+
+  // Seed stdin into the in-VM tty ring. Interactive mode makes an empty read park
+  // (FS_PENDING) instead of EOF-ing immediately, so the run loop can feed the
+  // remaining chunks incrementally (the ring is only 8192 bytes). The first chunk
+  // is pushed up front; the rest follow on each park, then EOF.
+  if (io.stdin) {
+    if (typeof X.vm_stdin_set_interactive === "function") X.vm_stdin_set_interactive(vmPtr, 1);
+    feedStdin(X, memory, vmPtr, io.stdin);
+  }
 
   // ---- exec loop ----
   // Exact instruction count comes from nano's block-cache counters
@@ -163,7 +194,15 @@ export async function runPass({ wasmPath, elf, run, recipeDir, treeDir }) {
       break;
     }
     if (status === 6) {
-      const nr = processFsRequest(X, dv, memory, ramPtr, vmPtr, memfs);
+      // A parked stdin read/ppoll (only with seeded stdin) is fed from the
+      // run.json buffer and retried in-VM — it never goes through the FS bridge.
+      // Each feed makes progress (next chunk, else EOF) so it cannot hang.
+      if (io.stdin && isStdinPark(X, dv, vmPtr)) {
+        feedStdin(X, memory, vmPtr, io.stdin);
+        X.vm_io_retry(vmPtr);
+        continue;
+      }
+      const nr = processFsRequest(X, dv, memory, ramPtr, vmPtr, memfs, io);
       if (nr === -38) enosys = true;
       continue;
     }
@@ -324,10 +363,112 @@ function loadTree(memfs, root) {
 }
 
 // ---------------------------------------------------------------------------
+// Deterministic I/O fixtures (M1 stdin + B3 net record/replay).
+// ---------------------------------------------------------------------------
+
+// Build the seeded-stdin buffer from run.json "stdin" (a string or an array of
+// string/byte chunks). Returns { buf, pos } or null when no stdin is declared.
+export function buildStdin(spec) {
+  if (spec == null) return null;
+  const enc = new TextEncoder();
+  let buf;
+  if (typeof spec === "string") buf = enc.encode(spec);
+  else if (Array.isArray(spec)) buf = concat(spec.map((c) => (typeof c === "string" ? enc.encode(c) : Uint8Array.from(c))));
+  else return null;
+  return { buf, pos: 0, scratch: 0, scratchCap: 0 };
+}
+
+// Is the current FS_PENDING a parked stdin read/ppoll (vs. a real FS request)?
+function isStdinPark(X, dv, vmPtr) {
+  const reqPtr = X.vm_fs_request_ptr(vmPtr);
+  const sysnr = dv.getInt32(reqPtr, true);
+  if (sysnr === SYS_PPOLL) return true;            // ppoll only parks for stdin
+  if (sysnr !== SYS_READ) return false;
+  const pfd = dv.getInt32(reqPtr + 4, true);
+  if (pfd < 0 || pfd >= MAX_FDS) return false;
+  return dv.getInt32(vmPtr + FD_TABLE_OFF + pfd * FD_ENTRY_SIZE, true) === FD_TYPE_STDIN;
+}
+
+// Push the next stdin chunk into the guest tty ring (via a malloc'd linear-memory
+// scratch buffer), or signal EOF once drained. Always makes forward progress so a
+// parked stdin op completes on the following vm_io_retry. Re-signalling EOF on
+// every drained call is intentional: it guarantees a re-polling guest can't park
+// forever after end-of-input.
+function feedStdin(X, memory, vmPtr, sin) {
+  if (sin.pos < sin.buf.length) {
+    const n = Math.min(STDIN_CHUNK, sin.buf.length - sin.pos);
+    if (!sin.scratch || sin.scratchCap < n) {
+      sin.scratch = X.malloc(Math.max(n, STDIN_CHUNK));
+      sin.scratchCap = Math.max(n, STDIN_CHUNK);
+    }
+    new Uint8Array(memory.buffer).set(sin.buf.subarray(sin.pos, sin.pos + n), sin.scratch);
+    X.vm_stdin_push(vmPtr, sin.scratch, n);
+    sin.pos += n;
+  } else if (typeof X.vm_stdin_eof === "function") {
+    X.vm_stdin_eof(vmPtr);
+  }
+}
+
+// Build the NET record/replay state from run.json "net" (array of {url, response}).
+// `response` paths resolve relative to the recipe's test/ dir (like loadFixtures).
+// Returns { map, req, resp, pos } or null when no net fixtures are declared.
+export function buildNetState(netSpec, testDir) {
+  if (!Array.isArray(netSpec) || netSpec.length === 0) return null;
+  const map = new Map();
+  for (const item of netSpec) {
+    if (!item || !item.url || !item.response) continue;
+    map.set(String(item.url), resolve(testDir, item.response));
+  }
+  return { map, req: [], resp: null, pos: 0 };
+}
+
+const NET_HTTP_PREFIX = "HTTP/1.1 ";
+
+// Turn an accumulated guest request into the bytes the guest reads back. Parses
+// the request's first line ("METHOD URL ...") for the URL, looks it up in the
+// fixture map (exact match, then a "*" catch-all), loads the fixture, and frames
+// it as an HTTP/1.1 response. A fixture already starting with "HTTP/1.1 " is
+// served verbatim; otherwise it is the raw body wrapped in a synthetic 200. An
+// unmatched url yields a deterministic 404 so the golden stays stable.
+export function buildNetResponse(reqBytes, net) {
+  const text = new TextDecoder().decode(reqBytes);
+  const sep = text.indexOf("\n\n");
+  const head = sep >= 0 ? text.slice(0, sep) : text;
+  const firstLine = (head.split("\n")[0] || "").replace(/\r$/, "").trim();
+  const parts = firstLine.split(/\s+/).filter(Boolean);
+  let url = "";
+  if (parts.length >= 2) url = parts[1];
+  else if (parts.length === 1 && /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(parts[0])) url = parts[0];
+
+  let fixturePath = net.map.get(url) || net.map.get("*");
+  if (!fixturePath) {
+    const body = new TextEncoder().encode(`nano-net: no fixture for ${url || "(no url)"}\n`);
+    return frameHttp(404, "Not Found", body);
+  }
+  const body = new Uint8Array(readFileSync(fixturePath));
+  if (startsWithAscii(body, NET_HTTP_PREFIX)) return body; // pre-framed fixture
+  return frameHttp(200, "OK", body);
+}
+
+function frameHttp(status, statusText, body) {
+  const head = new TextEncoder().encode(`HTTP/1.1 ${status} ${statusText}\r\ncontent-length: ${body.length}\r\n\r\n`);
+  const out = new Uint8Array(head.length + body.length);
+  out.set(head, 0);
+  out.set(body, head.length);
+  return out;
+}
+
+function startsWithAscii(bytes, str) {
+  if (bytes.length < str.length) return false;
+  for (let i = 0; i < str.length; i++) if (bytes[i] !== str.charCodeAt(i)) return false;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // FS dispatch — ported from nano/test/run.mjs processFsRequest. Returns the
 // syscall number (or -38 when an unhandled syscall hit the bridge → ENOSYS).
 // ---------------------------------------------------------------------------
-function processFsRequest(X, dv, memory, ramPtr, vmPtr, memfs) {
+function processFsRequest(X, dv, memory, ramPtr, vmPtr, memfs, io) {
   const reqPtr = X.vm_fs_request_ptr(vmPtr);
   const syscallNr = dv.getInt32(reqPtr, true);
   const gfd = dv.getInt32(reqPtr + 4, true);
@@ -352,6 +493,65 @@ function processFsRequest(X, dv, memory, ramPtr, vmPtr, memfs) {
   const fdClear = (g) => fdWrite(g, 0, -1, 0, 0);
   const fdAlloc = () => { for (let i = 3; i < MAX_FDS; i++) if (dv.getInt32(vmPtr + FD_TABLE_OFF + i * FD_ENTRY_SIZE, true) === FD_TYPE_NONE) return i; return -24; };
   const fdOff = (g, n) => dv.setBigInt64(vmPtr + FD_TABLE_OFF + g * FD_ENTRY_SIZE + 8, BigInt(n), true);
+
+  // ---- NET record/replay sentinel (B3) — mirrors container's /dev/__net__ ----
+  // Guest openat("/dev/__net__") gets a sentinel fd (host_fd === -98); it WRITES
+  // a request ("METHOD URL\nHeader: v\n\nbody"), then READS back an HTTP/1.1
+  // response replayed from the recipe's net fixtures. Request/response state is
+  // kept at run level (on `io.net`) so the two-open "printf >dev; read <dev"
+  // pattern works as well as a single-fd RDWR shim. Only active when run.json
+  // declares "net", so non-NET recipes are completely unaffected.
+  const net = io && io.net;
+  if (net) {
+    if (syscallNr === SYS_OPENAT && path === "/dev/__net__") {
+      const ng = fdAlloc();
+      if (ng >= 0) fdWrite(ng, FD_TYPE_FILE, -98, 0, 0);
+      dv.setBigInt64(vmPtr + OFF_A0, BigInt(ng), true);
+      dv.setInt32(vmPtr + OFF_STATUS, 0, true);
+      return SYS_OPENAT;
+    }
+    if (gfd >= 0 && gfd < MAX_FDS && fdRead(gfd).host_fd === -98) {
+      let r;
+      switch (syscallNr) {
+        case SYS_WRITE: {
+          const count = bufLen || arg1;
+          // A fresh write after a completed cycle starts a new request.
+          if (net.resp !== null && net.req.length === 0) { net.resp = null; net.pos = 0; }
+          net.req.push(new Uint8Array(memory.buffer, ramPtr + bufPtr, count).slice());
+          r = count; break;
+        }
+        case SYS_READ: {
+          if (net.resp === null) { net.resp = buildNetResponse(concat(net.req), net); net.req = []; net.pos = 0; }
+          const want = bufLen || arg1;
+          const n = Math.min(want, net.resp.length - net.pos);
+          if (n > 0) {
+            new Uint8Array(memory.buffer, ramPtr + bufPtr, n).set(net.resp.subarray(net.pos, net.pos + n));
+            net.pos += n;
+          }
+          r = n; break;
+        }
+        case SYS_CLOSE: {
+          fdClear(gfd);
+          // Request written then closed without a read (printf>; read pattern):
+          // build the response now so the next open+read serves it.
+          if (net.req.length && net.resp === null) { net.resp = buildNetResponse(concat(net.req), net); net.req = []; net.pos = 0; }
+          r = 0; break;
+        }
+        case SYS_FSTAT: {
+          const phys = ramPtr + (arg1 >>> 0);
+          new Uint8Array(memory.buffer, phys, 128).fill(0);
+          const sdv = new DataView(memory.buffer, phys, 128);
+          sdv.setUint32(16, 0o100644, true); sdv.setUint32(20, 1, true); sdv.setInt32(56, 4096, true);
+          r = 0; break;
+        }
+        case SYS_LSEEK: { r = 0; break; }
+        default: r = -22; break; // EINVAL for unsupported ops on the net device
+      }
+      dv.setBigInt64(vmPtr + OFF_A0, BigInt(r), true);
+      dv.setInt32(vmPtr + OFF_STATUS, 0, true);
+      return syscallNr;
+    }
+  }
 
   let result = 0;
   switch (syscallNr) {
@@ -386,7 +586,11 @@ function processFsRequest(X, dv, memory, ramPtr, vmPtr, memfs) {
     case SYS_READ: {
       if (gfd < 0 || gfd >= MAX_FDS) { result = -9; break; }
       const fe = fdRead(gfd);
-      if (fe.fd_type === FD_TYPE_STDIN) { result = 0; break; } // no live stdin in conformance
+      // stdin is owned by the in-VM tty ring (try_read), so a *seeded* stdin read
+      // never reaches here as a normal SYS_READ — it parks (FS_PENDING) and the
+      // run loop's stdin feeder (M1) serves it. This stays the historical
+      // "no live stdin" immediate-EOF for the unseeded case.
+      if (fe.fd_type === FD_TYPE_STDIN) { result = 0; break; }
       if (fe.fd_type === FD_TYPE_PIPE) { result = 0; break; }
       if (fe.fd_type !== FD_TYPE_FILE && fe.fd_type !== FD_TYPE_DIR) { result = -9; break; }
       const n = memfs.pread(fe.host_fd, memory, ramPtr + bufPtr, bufLen || arg1, fe.offset);
