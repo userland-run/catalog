@@ -11,10 +11,14 @@ command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/n
 
 rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
 cd .src
-# add the musl target to the repo-PINNED toolchain (rust-toolchain.toml), else E0463
 rustup target add riscv64gc-unknown-linux-musl
-cargo zigbuild --release --target riscv64gc-unknown-linux-musl -p b3sum --bin b3sum
-cd ..
+# b3sum is a standalone crate under b3sum/ — NOT a member of the root blake3
+# package (the repo has no cargo workspace), so `-p b3sum` from the root fails
+# "package ID specification `b3sum` did not match any packages". Build inside its
+# own directory; it pulls in the parent blake3 via a `path = ".."` dependency.
+cd b3sum
+cargo zigbuild --release --target riscv64gc-unknown-linux-musl --bin b3sum
+cd ../..
 mkdir -p out
-cp .src/target/riscv64gc-unknown-linux-musl/release/b3sum out/b3sum
+cp .src/b3sum/target/riscv64gc-unknown-linux-musl/release/b3sum out/b3sum
 file out/b3sum
