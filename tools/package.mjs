@@ -95,20 +95,28 @@ function* walkFiles(root, base = root) {
   }
 }
 
-// Find a recipe's built binary + verdict in the artifacts tree.
+// Find a recipe's out/ dir + verdict.json in the artifact. The build job uploads
+// `recipes/<r>/out/**` + verdict.json, so both may be nested under the artifact
+// dir — search recursively for them.
 function findBuild(artifactDir) {
-  const verdictPath = resolve(artifactDir, "verdict.json");
-  // binary: first executable regular file under out/
-  const outRoot = resolve(artifactDir, "out");
+  let outRoot = null, verdictPath = null;
+  const walk = (d) => {
+    for (const name of readdirSync(d)) {
+      const p = resolve(d, name);
+      const st = statSync(p);
+      if (st.isFile()) { if (name === "verdict.json" && !verdictPath) verdictPath = p; }
+      else if (st.isDirectory()) { if (name === "out" && !outRoot) outRoot = p; else walk(p); }
+    }
+  };
+  walk(artifactDir);
   let binary = null;
-  if (existsSync(outRoot)) {
+  if (outRoot) {
     for (const name of readdirSync(outRoot)) {
       const p = resolve(outRoot, name);
-      const st = statSync(p);
-      if (st.isFile()) { binary = p; break; }
+      if (statSync(p).isFile()) { binary = p; break; }
     }
   }
-  return { binary, verdictPath: existsSync(verdictPath) ? verdictPath : null };
+  return { binary, outRoot, verdictPath };
 }
 
 const records = [];
@@ -122,16 +130,16 @@ for (const dir of buildDirs) {
   const recipeTomlPath = resolve(recipesDir, recipeName, "recipe.toml");
   if (!existsSync(recipeTomlPath)) { console.error(`skip ${recipeName}: no recipe.toml`); continue; }
   const recipe = parseToml(readFileSync(recipeTomlPath, "utf8"));
-  const { binary, verdictPath } = findBuild(dir);
+  const { binary, outRoot, verdictPath } = findBuild(dir);
   if (!verdictPath) { console.error(`skip ${recipeName}: no verdict.json`); continue; }
   if (!recipe.multifile && !binary) { console.error(`skip ${recipeName}: no binary in out/`); continue; }
+  if (recipe.multifile && !outRoot) { console.error(`skip ${recipeName}: no out/ tree`); continue; }
 
   const verdict = JSON.parse(readFileSync(verdictPath, "utf8"));
 
   // Single-binary recipe → one file at its install path. Multi-file recipe
-  // (e.g. devenv) → walk out/ as a guest-FS-rooted tree (out/usr/bin/node →
+  // (e.g. typescript) → walk out/ as a guest-FS-rooted tree (out/usr/bin/node →
   // /usr/bin/node), one files[] entry per file, lazily installable per-file.
-  const outRoot = resolve(dir, "out");
   let files;
   if (recipe.multifile) {
     files = [...walkFiles(outRoot)].map((f) => packageFile(f.abs, "/" + f.rel, f.mode));
