@@ -19,9 +19,9 @@
 //   { loaded, exitCode, stdoutSha256, faulted, enosys,
 //     syscalls: { "<nr>": count, ... }, instructions, wallMs, peakRamMb }
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, relative, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MemFS } from "./vendor/memfs.mjs";
 
@@ -66,7 +66,7 @@ const SYS_GETCWD = 17, SYS_MKDIRAT = 34, SYS_UNLINKAT = 35, SYS_FACCESSAT = 48,
  * @param {string} o.recipeDir recipe directory (to resolve `load` fixtures)
  * @returns {object} verdict
  */
-export async function runPass({ wasmPath, elf, run, recipeDir }) {
+export async function runPass({ wasmPath, elf, run, recipeDir, treeDir }) {
   const wasmBytes = readFileSync(wasmPath);
   const ramMb = Number(run.ramMb) > 0 ? Number(run.ramMb) : 1024;
   const RAM_SIZE = ramMb * 1024 * 1024;
@@ -124,6 +124,7 @@ export async function runPass({ wasmPath, elf, run, recipeDir }) {
   // `load[].from` is relative to the recipe's test/ dir (where run.json lives),
   // matching the spec — e.g. "fixtures/corpus.txt".
   loadFixtures(memfs, run.load || [], resolve(recipeDir, "test"));
+  if (treeDir) loadTree(memfs, treeDir);
 
   // ---- exec loop ----
   // Exact instruction count comes from nano's block-cache counters
@@ -282,19 +283,44 @@ function seedFs(RAM_SIZE, RAM_MB) {
   return memfs;
 }
 
+function mkParents(memfs, to) {
+  const parts = to.split("/").filter(Boolean);
+  let dir = "";
+  for (let j = 0; j < parts.length - 1; j++) {
+    dir += "/" + parts[j];
+    try { memfs.createDir(dir); } catch { /* exists */ }
+  }
+}
+
 function loadFixtures(memfs, load, recipeDir) {
   for (const item of load) {
-    const fromPath = resolve(recipeDir, item.from);
-    const to = item.to;
-    const data = readFileSync(fromPath);
-    const parts = to.split("/").filter(Boolean);
-    let dir = "";
-    for (let j = 0; j < parts.length - 1; j++) {
-      dir += "/" + parts[j];
-      try { memfs.createDir(dir); } catch { /* exists */ }
-    }
-    memfs.createFile(to, data);
+    const data = readFileSync(resolve(recipeDir, item.from));
+    mkParents(memfs, item.to);
+    memfs.createFile(item.to, data);
   }
+}
+
+// Stage a whole directory tree into the guest FS (dir/<rel> → /<rel>), for
+// multi-file apps like devenv where the entrypoint binary needs its node_modules
+// tree present. Symlinks are skipped (mirrors the packager).
+function loadTree(memfs, root) {
+  let count = 0;
+  const walk = (cur) => {
+    for (const name of readdirSync(cur)) {
+      const p = join(cur, name);
+      const st = statSync(p, { throwIfNoEntry: false });
+      if (!st || st.isSymbolicLink?.()) continue;
+      if (st.isDirectory()) { walk(p); continue; }
+      if (st.isFile()) {
+        const to = "/" + relative(root, p);
+        mkParents(memfs, to);
+        memfs.createFile(to, readFileSync(p));
+        count++;
+      }
+    }
+  };
+  walk(root);
+  console.error(`[conformance] staged ${count} tree file(s) from ${root}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -460,13 +486,14 @@ async function main() {
   const argv = process.argv.slice(2);
   const getOpt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
   // First positional that isn't a flag or a flag's value.
-  const valueFlags = new Set(["--recipe", "--report", "--merge"]);
+  const valueFlags = new Set(["--recipe", "--report", "--merge", "--tree"]);
   let elfPath;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i].startsWith("--")) { if (valueFlags.has(argv[i])) i++; continue; }
     elfPath = argv[i]; break;
   }
   const recipeDir = resolve(getOpt("--recipe") || ".");
+  const treeDir = getOpt("--tree") ? resolve(getOpt("--tree")) : undefined;
   const reportPath = getOpt("--report");
   const mergePath = getOpt("--merge");
   const isTrace = argv.includes("--trace") || !!mergePath;
@@ -480,7 +507,7 @@ async function main() {
   const run = JSON.parse(readFileSync(runJsonPath, "utf8"));
   const elf = new Uint8Array(readFileSync(elfPath));
 
-  const v = await runPass({ wasmPath, elf, run, recipeDir });
+  const v = await runPass({ wasmPath, elf, run, recipeDir, treeDir });
 
   if (mergePath) {
     // Trace pass: keep the plain verdict authoritative for everything except the
