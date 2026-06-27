@@ -1,0 +1,21 @@
+name = "fd"
+version = "10.2.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/sharkdp/fd"
+rev = "v10.2.0"
+
+[entrypoint]
+argv = ["fd"]
+env = { }
+
+[bundle]
+topics = ["Text", "Search"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.fd"]

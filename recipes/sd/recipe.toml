@@ -1,0 +1,21 @@
+name = "sd"
+version = "1.0.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/chmln/sd"
+rev = "v1.0.0"
+
+[entrypoint]
+argv = ["sd"]
+env = { }
+
+[bundle]
+topics = ["Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.sd"]

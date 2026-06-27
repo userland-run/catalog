@@ -1,0 +1,21 @@
+name = "hexyl"
+version = "0.14.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/sharkdp/hexyl"
+rev = "v0.14.0"
+
+[entrypoint]
+argv = ["hexyl"]
+env = { }
+
+[bundle]
+topics = ["Encryption", "Data"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.hexyl"]
