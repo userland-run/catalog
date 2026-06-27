@@ -9,7 +9,7 @@
   "load": [],
   "expect": {
     "exitCode": 0,
-    "stdoutSha256": "TBD",
+    "stdoutSha256": "5d3d3efbf054dbbc1a59246e28e6e0c082d21aafb632e4992a5432ae13045ec6",
     "maxInstructions": 2000000000,
     "maxWallMs": 30000
   }
