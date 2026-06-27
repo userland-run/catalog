@@ -49,14 +49,21 @@ if (tree) cargs.push("--tree", tree);
 execFileSync("node", cargs, { stdio: ["ignore", "inherit", "inherit"], env: { ...process.env, NANOVM_WASM: wasm } });
 
 const verdict = JSON.parse(readFileSync(verdictPath, "utf8"));
-if (!verdict.loaded || verdict.faulted) {
-  console.error(`conformance failed: loaded=${verdict.loaded} faulted=${verdict.faulted} exit=${verdict.exitCode} — not patching run.json`);
+if (!verdict.loaded || verdict.faulted || verdict.enosys) {
+  console.error(`conformance failed: loaded=${verdict.loaded} faulted=${verdict.faulted} enosys=${verdict.enosys} exit=${verdict.exitCode} — not capturing`);
   process.exit(1);
 }
 
 const runPath = resolve(recipeDir, "test/run.json");
 const run = JSON.parse(readFileSync(runPath, "utf8"));
-run.expect.exitCode = verdict.exitCode;
-run.expect.stdoutSha256 = verdict.stdoutSha256;
+// Only capture when the tool exited as the recipe expects (default 0). A
+// clean-but-wrong exit (e.g. a tool that bails because a dep/device is missing)
+// must NOT silently record a bogus golden — leave it TBD so the failure is loud.
+const expectExit = run.expect?.exitCode ?? 0;
+if (verdict.exitCode !== expectExit) {
+  console.error(`exit ${verdict.exitCode} != expected ${expectExit} — refusing to capture (build/runtime issue); leaving golden TBD`);
+  process.exit(1);
+}
+run.expect.stdoutSha256 = verdict.stdoutSha256;   // keep the recipe's declared exitCode
 writeFileSync(runPath, JSON.stringify(run, null, 2) + "\n");
 console.error(`captured ${name}: exit ${verdict.exitCode}, sha ${verdict.stdoutSha256}, ${verdict.instructions} insns → ${runPath}`);
