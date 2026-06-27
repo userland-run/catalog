@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-UEL
+# Copyright (C) 2026 And The Next GmbH - https://userland.run
+#
+# Bootstrap a new recipe's conformance golden in CI. A scaffolded recipe ships
+# test/run.json with "stdoutSha256": "TBD"; the cross-compile toolchain lives in
+# CI, so this builds each TBD recipe, captures the golden against the released
+# nano runtime (tools/capture-golden.mjs), and commits run.json back. The normal
+# publish.yml then ENFORCES that golden. This lets recipes be added without a
+# local riscv64-musl toolchain: scaffold (new-recipe.mjs) → push → CI captures.
+name: capture-goldens
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["recipes/**/build.sh", "recipes/**/recipe.toml", "recipes/**/test/run.json"]
+
+permissions:
+  contents: write   # commit the captured goldens back
+
+env:
+  NANO_RELEASE: https://github.com/userland-run/nano/releases/download/v0.1.0
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: riscv64gc-unknown-linux-musl }
+      - name: Cache zig
+        uses: actions/cache@v4
+        with: { path: ~/.zig-0.13.0, key: zig-0.13.0-linux-x86_64 }
+      - name: Setup zig (cached + retried)
+        run: |
+          ZDIR="$HOME/.zig-0.13.0"
+          if [ ! -x "$ZDIR/zig" ]; then
+            curl -fL --retry 6 --retry-all-errors --retry-delay 5 \
+              "https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz" -o /tmp/zig.tar.xz
+            mkdir -p "$ZDIR" && tar -xJf /tmp/zig.tar.xz -C "$ZDIR" --strip-components=1
+          fi
+          echo "$ZDIR" >> "$GITHUB_PATH"; "$ZDIR/zig" version
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+
+      - name: Fetch nano runtime (+ node for runner=node recipes)
+        run: |
+          curl -fsSL "$NANO_RELEASE/nano.min.wasm" -o nano.min.wasm
+          curl -fsSL "$NANO_RELEASE/node"          -o node-runtime || true
+
+      - name: Build + capture goldens for TBD recipes
+        id: cap
+        run: |
+          captured=0
+          for d in recipes/*/; do
+            r="${d%/}"; name="$(basename "$r")"; rj="$r/test/run.json"
+            [ -f "$rj" ] || continue
+            grep -q '"stdoutSha256": *"TBD"' "$rj" || continue
+            echo "::group::capture $name"
+            if ! bash "$r/build.sh"; then echo "::warning::build failed: $name"; echo "::endgroup::"; continue; fi
+            if grep -q 'runner *= *"node"' "$r/recipe.toml"; then
+              NANOVM_WASM=nano.min.wasm node tools/capture-golden.mjs "$name" --bin node-runtime --tree "$r/out" \
+                || echo "::warning::capture failed: $name"
+            else
+              NANOVM_WASM=nano.min.wasm node tools/capture-golden.mjs "$name" \
+                || echo "::warning::capture failed: $name"
+            fi
+            captured=1
+            echo "::endgroup::"
+          done
+          echo "captured=$captured" >> "$GITHUB_OUTPUT"
+
+      - name: Commit captured goldens
+        if: steps.cap.outputs.captured == '1'
+        run: |
+          git config user.name  "nano-catalog-bot"
+          git config user.email "bot@userland.run"
+          # Only the run.json goldens; leave build artifacts (out/, .src) out.
+          git add recipes/*/test/run.json
+          if git diff --cached --quiet; then
+            echo "no golden changes to commit"
+          else
+            # No [skip ci]: the golden commit must trigger publish.yml (now with a
+            # real golden). capture.yml re-fires too but finds no TBD → no-op.
+            git commit -m "ci: capture conformance goldens"
+            git push
+          fi

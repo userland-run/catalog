@@ -31,13 +31,22 @@ jobs:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.sha }}
         run: |
-          # Emit a JSON array of changed recipe names for the matrix.
+          # Emit a JSON array of changed recipe names for the matrix. Recipes whose
+          # golden is still "TBD" are skipped — capture.yml captures the golden and
+          # commits it, which re-triggers this with a real golden to enforce.
           range="${BASE}..${HEAD}"
           if ! git rev-parse "$BASE" >/dev/null 2>&1; then range="$HEAD"; fi  # first push / shallow
-          changed=$(git diff --name-only $range -- 'recipes/' \
-            | sed -n 's#^recipes/\([^/]*\)/.*#\1#p' | sort -u | jq -R . | jq -cs .)
-          echo "recipes=${changed:-[]}" >> "$GITHUB_OUTPUT"
-          echo "changed recipes: ${changed:-[]}"
+          ready=""
+          for name in $(git diff --name-only $range -- 'recipes/' | sed -n 's#^recipes/\([^/]*\)/.*#\1#p' | sort -u); do
+            rj="recipes/$name/test/run.json"
+            if [ -f "$rj" ] && grep -q '"stdoutSha256": *"TBD"' "$rj"; then
+              echo "skip $name: golden not captured yet (TBD)"; continue
+            fi
+            ready="$ready$name"$'\n'
+          done
+          arr=$(printf "%s" "$ready" | sed '/^$/d' | jq -R . | jq -cs .)
+          echo "recipes=${arr:-[]}" >> "$GITHUB_OUTPUT"
+          echo "publishable changed recipes: ${arr:-[]}"
 
   build-test:
     needs: changed
