@@ -1,0 +1,21 @@
+name = "xan"
+version = "0.59.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/medialab/xan"
+rev = "0.59.0"
+
+[entrypoint]
+argv = ["xan"]
+env = { }
+
+[bundle]
+topics = ["Data"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.xan"]

@@ -1,0 +1,21 @@
+name = "fend"
+version = "1.5.8"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/printfn/fend"
+rev = "v1.5.8"
+
+[entrypoint]
+argv = ["fend"]
+env = { }
+
+[bundle]
+topics = ["Math"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.fend"]

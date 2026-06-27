@@ -1,0 +1,21 @@
+name = "ambr"
+version = "0.6.1"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/dalance/amber"
+rev = "v0.6.1"
+
+[entrypoint]
+argv = ["ambr"]
+env = { }
+
+[bundle]
+topics = ["Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.ambr"]
