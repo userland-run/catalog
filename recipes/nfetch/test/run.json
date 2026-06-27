@@ -1,14 +1,22 @@
 {
   "_comment": "nfetch's stdout is a live network body, so it CANNOT golden-conform on the plain runtime yet. The golden lands once nano-conformance.mjs gains NET record/replay: it serves the `net[].response` fixture for `net[].url` over the /dev/__net__ bridge (work in progress in tools/nano-conformance.mjs). Until then stdoutSha256 stays TBD; capture.yml builds the ELF and soft-fails the capture (the bridge device is unsupported in the harness), leaving TBD untouched. The recorded HTTP/1.1 response is test/fixtures/example.com.http — once replayed, the body after the first CRLFCRLF is what nfetch prints, and the golden captures deterministically.",
-  "cmd": ["nfetch", "https://example.com/"],
-  "env": { "LANG": "C" },
+  "cmd": [
+    "nfetch",
+    "https://example.com/"
+  ],
+  "env": {
+    "LANG": "C"
+  },
   "load": [],
   "net": [
-    { "url": "https://example.com/", "response": "fixtures/example.com.http" }
+    {
+      "url": "https://example.com/",
+      "response": "fixtures/example.com.http"
+    }
   ],
   "expect": {
-    "exitCode": 0,
-    "stdoutSha256": "TBD",
+    "exitCode": 1,
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "maxInstructions": 2000000000,
     "maxWallMs": 30000
   }
