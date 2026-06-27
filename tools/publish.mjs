@@ -28,9 +28,13 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, cpSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { finalizeManifest, loadPrivateKey } from "./lib/manifest.mjs";
+
+const sha256hex = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 const toolsDir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(toolsDir, "..");
@@ -107,11 +111,55 @@ for (const rec of records) apps[`${rec.name}@${rec.version}`] = rec.manifestSha;
 const carried = carryForwardCas();
 console.error(`apps in index: ${Object.keys(apps).length} (carried forward ${carried} prior cas blob(s))`);
 
+// --- Topic bundles (bottling): one signed bundle manifest per topic, listing its
+// member app refs. Cumulative: carry forward prior bundles' refs and union in the
+// current recipes' topics. The CAS already dedups shared chunks across members. ---
+async function fetchPrevBundles() {
+  const out = {}; // slug -> { topic, apps: Set<ref> }
+  if (!prevVer) return out;
+  try {
+    const idx = await (await fetch(`https://cdn.jsdelivr.net/npm/@nano-apps/index@${prevVer}/index.json`)).json();
+    for (const [slug, sha] of Object.entries(idx.bundles || {})) {
+      try {
+        const bm = await (await fetch(`https://cdn.jsdelivr.net/npm/@nano-apps/cas@${prevVer}/cas/${sha}`)).json();
+        out[slug] = { topic: bm.topic || slug, apps: new Set(bm.apps || []) };
+      } catch { /* skip a missing bundle */ }
+    }
+  } catch { /* no prior bundles */ }
+  return out;
+}
+
+const bundleAcc = await fetchPrevBundles();
+for (const rec of records) {
+  for (const topic of (rec.topics || [])) {
+    const slug = slugify(topic);
+    (bundleAcc[slug] = bundleAcc[slug] || { topic, apps: new Set() }).apps.add(`${rec.name}@${rec.version}`);
+  }
+}
+const bundles = {}; // slug -> bundle manifest sha
+for (const [slug, { topic, apps: refs }] of Object.entries(bundleAcc)) {
+  const bundleCore = {
+    name: slug,
+    kind: "bundle",
+    topic,
+    generation: gen,
+    apps: [...refs].sort(),     // member "name@version" refs (dedup chunks at install)
+  };
+  const { bytes } = finalizeManifest(bundleCore, privateKey); // signed like an app manifest
+  const sha = sha256hex(bytes);
+  if (!existsSync(resolve(casDir, sha))) writeFileSync(resolve(casDir, sha), bytes);
+  bundles[slug] = sha;
+}
+if (Object.keys(bundles).length) {
+  console.error(`bundles: ${Object.entries(bundleAcc).map(([s, b]) => `${s}(${b.apps.size})`).join(", ")}`);
+}
+
 // --- Build + sign index.json ---
 const indexCore = {
   generation: gen,
   nano_min_version: nanoVersion,
   apps,                       // "name@version" -> manifest sha256 (a cas blob)
+  ...(Object.keys(bundles).length ? { bundles } : {}), // "topic-slug" -> bundle manifest sha
 };
 const { manifest: index } = finalizeManifest(indexCore, privateKey);
 

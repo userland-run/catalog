@@ -181,7 +181,7 @@ for (const dir of buildDirs) {
   const { manifest, bytes } = finalizeManifest(manifestCore, privateKey);
   const manifestSha = writeCas(bytes);  // signed manifest stored as a cas blob
 
-  records.push({ name: manifest.name, version: manifest.version, manifestSha, size: manifest.size });
+  records.push({ name: manifest.name, version: manifest.version, manifestSha, size: manifest.size, ...(topics.length ? { topics } : {}) });
   console.error(`packaged ${manifest.name}@${manifest.version}: ${files.length} file(s), ${totalChunks} chunk(s), ` +
     `gz ${(totalGz / 1024 / 1024).toFixed(2)}MB, manifest ${manifestSha.slice(0, 12)}…`);
 }
