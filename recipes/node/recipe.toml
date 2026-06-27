@@ -8,6 +8,7 @@ abi = "riscv64gc-linux-musl"
 # separate multi-file recipe that runs on this node.
 
 [source]
+# Prebuilt static RV64GC Node.js ELF (sourced by build.sh).
 prebuilt = true
 
 [entrypoint]

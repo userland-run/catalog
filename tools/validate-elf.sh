@@ -14,11 +14,17 @@ if [[ -z "$f" || ! -f "$f" ]]; then
 fi
 
 file "$f" | grep -q "ELF 64-bit LSB .*RISC-V"        || { echo "not RISC-V ELF"; exit 1; }
-file "$f" | grep -q "statically linked"              || { echo "not static"; exit 1; }
+# Accept plain-static and static-PIE: both are self-contained (no ld.so). nano's
+# ELF loader handles the static-PIE relocations (busybox ships this way).
+file "$f" | grep -Eq "statically linked|static-pie linked" || { echo "not static"; exit 1; }
 
-# A truly static binary has no dynamic section:
-if readelf -d "$f" 2>/dev/null | grep -q "Dynamic section"; then
-  echo "dynamic section present (needs ld.so)"; exit 1
+# Reject only a *dynamic* executable: a PT_INTERP (an ld.so request) or NEEDED
+# shared libraries. A static-PIE has a PT_DYNAMIC (RELA relocs) but neither.
+if readelf -l "$f" 2>/dev/null | grep -q "Requesting program interpreter"; then
+  echo "has PT_INTERP (needs ld.so)"; exit 1
+fi
+if readelf -d "$f" 2>/dev/null | grep -q "(NEEDED)"; then
+  echo "has NEEDED shared libraries"; exit 1
 fi
 
 # Arch attributes must not advertise unsupported extensions (e.g. v = vector):

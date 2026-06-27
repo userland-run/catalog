@@ -8,8 +8,8 @@ abi = "riscv64gc-linux-musl"
 # the applet symlinks (/bin/sh, /bin/ls, …) in the guest after install.
 
 [source]
-# The prebuilt static RV64GC BusyBox. build.sh sources it (see the script); a
-# from-source build is a follow-up.
+# The prebuilt static RV64GC BusyBox (static-PIE). build.sh sources it (see the
+# script); a from-source build is a follow-up.
 prebuilt = true
 
 [entrypoint]
