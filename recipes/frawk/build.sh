@@ -11,9 +11,12 @@ command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/n
 
 rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
 cd .src
-# add the musl target to the repo-PINNED toolchain (rust-toolchain.toml), else E0463
 rustup target add riscv64gc-unknown-linux-musl
-cargo zigbuild --release --target riscv64gc-unknown-linux-musl --bin frawk
+# frawk's default features pull in jemalloc (C — its build.rs trips up `zig cc`)
+# and llvm-sys (needs host LLVM libs); neither cross-compiles here. Drop them with
+# --no-default-features, which leaves the pure-Rust Cranelift backend + the system
+# allocator. (`--version` short-circuits before any JIT, so capture stays clean.)
+cargo zigbuild --release --target riscv64gc-unknown-linux-musl --bin frawk --no-default-features
 cd ..
 mkdir -p out
 cp .src/target/riscv64gc-unknown-linux-musl/release/frawk out/frawk
