@@ -163,7 +163,7 @@ function main() {
   }
   const bin = a.bin || name;
   const src = splitSrc(a.src);
-  const version = a.version || (src.rev || "0.0.0").replace(/^v/, "").replace(/^[a-z]+-/, "");
+  const version = a.version || (src.rev || "0.0.0").replace(/^[a-z]+-/, "").replace(/^v/, "");
   const topics = (a.topics || "").split(",").map((s) => s.trim()).filter(Boolean);
   const caveats = (a.caveats || "").split(",").map((s) => s.trim()).filter(Boolean);
   const testCmd = (a.test || `${bin} --version`).split(/\s+/);

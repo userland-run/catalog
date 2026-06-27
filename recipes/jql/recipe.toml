@@ -1,0 +1,21 @@
+name = "jql"
+version = "8.1.2"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/yamafaktory/jql"
+rev = "jql-v8.1.2"
+
+[entrypoint]
+argv = ["jql"]
+env = { }
+
+[bundle]
+topics = ["Data"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.jql"]

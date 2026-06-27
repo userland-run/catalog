@@ -1,0 +1,18 @@
+name = "just"
+version = "1.54.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/casey/just"
+rev = "1.54.0"
+
+[entrypoint]
+argv = ["just"]
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.just"]

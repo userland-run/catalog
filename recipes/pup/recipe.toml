@@ -1,0 +1,21 @@
+name = "pup"
+version = "0.4.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/ericchiang/pup"
+rev = "v0.4.0"
+
+[entrypoint]
+argv = ["pup"]
+env = { }
+
+[bundle]
+topics = ["Text", "Data"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.pup"]

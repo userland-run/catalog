@@ -1,0 +1,21 @@
+name = "rnr"
+version = "0.5.1"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/ismaelgv/rnr"
+rev = "v0.5.1"
+
+[entrypoint]
+argv = ["rnr"]
+env = { }
+
+[bundle]
+topics = ["Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.rnr"]

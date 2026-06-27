@@ -1,0 +1,21 @@
+name = "ouch"
+version = "0.8.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/ouch-org/ouch"
+rev = "0.8.0"
+
+[entrypoint]
+argv = ["ouch"]
+env = { }
+
+[bundle]
+topics = ["Archives"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.ouch"]

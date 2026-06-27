@@ -1,0 +1,21 @@
+name = "hck"
+version = "0.11.6"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/sstadick/hck"
+rev = "v0.11.6"
+
+[entrypoint]
+argv = ["hck"]
+env = { }
+
+[bundle]
+topics = ["Text", "Data"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.hck"]
