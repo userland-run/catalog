@@ -1,0 +1,21 @@
+name = "difftastic"
+version = "0.69.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/Wilfred/difftastic"
+rev = "0.69.0"
+
+[entrypoint]
+argv = ["difft"]
+env = { }
+
+[bundle]
+topics = ["Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.difftastic"]

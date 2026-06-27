@@ -1,0 +1,21 @@
+name = "jaq"
+version = "3.1.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/01mf02/jaq"
+rev = "v3.1.0"
+
+[entrypoint]
+argv = ["jaq"]
+env = { }
+
+[bundle]
+topics = ["Data", "Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.jaq"]

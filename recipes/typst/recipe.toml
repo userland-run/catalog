@@ -1,0 +1,21 @@
+name = "typst"
+version = "0.15.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/typst/typst"
+rev = "v0.15.0"
+
+[entrypoint]
+argv = ["typst"]
+env = { }
+
+[bundle]
+topics = ["Documents"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.typst"]

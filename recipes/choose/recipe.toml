@@ -1,0 +1,21 @@
+name = "choose"
+version = "1.3.7"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/theryangeary/choose"
+rev = "v1.3.7"
+
+[entrypoint]
+argv = ["choose"]
+env = { }
+
+[bundle]
+topics = ["Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.choose"]

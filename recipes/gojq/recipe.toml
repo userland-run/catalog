@@ -1,0 +1,21 @@
+name = "gojq"
+version = "0.12.19"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/itchyny/gojq"
+rev = "v0.12.19"
+
+[entrypoint]
+argv = ["gojq"]
+env = { }
+
+[bundle]
+topics = ["Data", "Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.gojq"]

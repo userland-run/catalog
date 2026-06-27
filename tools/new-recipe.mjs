@@ -62,7 +62,7 @@ command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/n
 
 rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
 cd .src
-cargo zigbuild --release --target riscv64gc-unknown-linux-musl SELECT
+cargo zigbuild --release --target riscv64gc-unknown-linux-musl ${sel}
 cd ..
 mkdir -p out
 cp .src/target/riscv64gc-unknown-linux-musl/release/${bin} out/${bin}

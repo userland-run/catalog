@@ -1,0 +1,21 @@
+name = "mlr"
+version = "6.19.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/johnkerl/miller"
+rev = "v6.19.0"
+
+[entrypoint]
+argv = ["mlr"]
+env = { }
+
+[bundle]
+topics = ["Data"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.mlr"]

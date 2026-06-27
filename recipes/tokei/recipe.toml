@@ -1,0 +1,21 @@
+name = "tokei"
+version = "14.0.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/XAMPPRocky/tokei"
+rev = "v14.0.0"
+
+[entrypoint]
+argv = ["tokei"]
+env = { }
+
+[bundle]
+topics = ["Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.tokei"]
