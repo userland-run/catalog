@@ -1,0 +1,21 @@
+name = "numbat"
+version = "1.23.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/sharkdp/numbat"
+rev = "v1.23.0"
+
+[entrypoint]
+argv = ["numbat"]
+env = { }
+
+[bundle]
+topics = ["Math"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.numbat"]

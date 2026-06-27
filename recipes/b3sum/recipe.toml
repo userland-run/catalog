@@ -1,0 +1,21 @@
+name = "b3sum"
+version = "1.8.5"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/BLAKE3-team/BLAKE3"
+rev = "1.8.5"
+
+[entrypoint]
+argv = ["b3sum"]
+env = { }
+
+[bundle]
+topics = ["Encryption"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.b3sum"]

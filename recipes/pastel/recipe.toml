@@ -1,0 +1,21 @@
+name = "pastel"
+version = "0.12.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/sharkdp/pastel"
+rev = "v0.12.0"
+
+[entrypoint]
+argv = ["pastel"]
+env = { }
+
+[bundle]
+topics = ["Showcase"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.pastel"]

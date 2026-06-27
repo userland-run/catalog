@@ -1,0 +1,21 @@
+name = "dust"
+version = "1.2.4"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/bootandy/dust"
+rev = "v1.2.4"
+
+[entrypoint]
+argv = ["dust"]
+env = { }
+
+[bundle]
+topics = ["Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.dust"]

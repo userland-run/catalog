@@ -1,0 +1,21 @@
+name = "shfmt"
+version = "3.13.1"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/mvdan/sh"
+rev = "v3.13.1"
+
+[entrypoint]
+argv = ["shfmt"]
+env = { }
+
+[bundle]
+topics = ["Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.shfmt"]

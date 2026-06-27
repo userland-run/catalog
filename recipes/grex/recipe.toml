@@ -1,0 +1,21 @@
+name = "grex"
+version = "1.4.6"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/pemistahl/grex"
+rev = "v1.4.6"
+
+[entrypoint]
+argv = ["grex"]
+env = { }
+
+[bundle]
+topics = ["Text"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.grex"]

@@ -1,0 +1,21 @@
+name = "resvg"
+version = "0.47.0"
+abi = "riscv64gc-linux-musl"
+
+[source]
+git = "https://github.com/linebender/resvg"
+rev = "v0.47.0"
+
+[entrypoint]
+argv = ["resvg"]
+env = { }
+
+[bundle]
+topics = ["Images"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.resvg"]

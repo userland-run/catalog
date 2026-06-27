@@ -1,0 +1,16 @@
+{
+  "cmd": [
+    "goawk",
+    "--version"
+  ],
+  "env": {
+    "LANG": "C"
+  },
+  "load": [],
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "TBD",
+    "maxInstructions": 2000000000,
+    "maxWallMs": 30000
+  }
+}
