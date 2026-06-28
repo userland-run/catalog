@@ -32,6 +32,7 @@ import { createHash } from "node:crypto";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { finalizeManifest, loadPrivateKey } from "./lib/manifest.mjs";
+import { parseToml } from "./lib/toml.mjs";
 
 const sha256hex = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -154,12 +155,44 @@ if (Object.keys(bundles).length) {
   console.error(`bundles: ${Object.entries(bundleAcc).map(([s, b]) => `${s}(${b.apps.size})`).join(", ")}`);
 }
 
-// --- Build + sign index.json ---
+// --- Categories (browse facets): denormalized topic-slug -> app refs, from the
+// same accumulator that builds the topic bundles (so the slugs match `bundles`).
+// Lets clients group apps by category without fetching every bundle manifest. ---
+const categories = {};
+for (const [slug, { apps: refs }] of Object.entries(bundleAcc)) {
+  categories[slug] = [...refs].sort();
+}
+
+// --- Collections (hand-curated workflow sets), read from catalog/collections.toml.
+// Distinct from categories: an intentional set of apps (by NAME, version-resolved
+// at install) — e.g. a Node dev toolchain. Unknown members are dropped (warned);
+// an all-unknown collection is skipped. ---
+const appNames = new Set(Object.keys(apps).map((k) => k.slice(0, k.lastIndexOf("@"))));
+const collections = {};
+const collectionsPath = resolve(root, "collections.toml");
+if (existsSync(collectionsPath)) {
+  const parsed = parseToml(readFileSync(collectionsPath, "utf8"));
+  for (const [slug, def] of Object.entries(parsed)) {
+    if (!def || typeof def !== "object" || Array.isArray(def)) continue;
+    const members = (Array.isArray(def.members) ? def.members : []).map(String);
+    const known = members.filter((m) => appNames.has(m));
+    const unknown = members.filter((m) => !appNames.has(m));
+    if (unknown.length) console.error(`  collection ${slug}: dropping unknown member(s) ${unknown.join(", ")}`);
+    if (!known.length) { console.error(`  collection ${slug}: no known members, skipping`); continue; }
+    collections[slug] = { title: String(def.title || slug), description: String(def.description || ""), members: known };
+  }
+  console.error(`collections: ${Object.entries(collections).map(([s, c]) => `${s}(${c.members.length})`).join(", ") || "none"}`);
+}
+
+// --- Build + sign index.json (canonicalization sorts keys, so the signature
+// covers categories + collections regardless of insertion order) ---
 const indexCore = {
   generation: gen,
   nano_min_version: nanoVersion,
   apps,                       // "name@version" -> manifest sha256 (a cas blob)
-  ...(Object.keys(bundles).length ? { bundles } : {}), // "topic-slug" -> bundle manifest sha
+  ...(Object.keys(bundles).length ? { bundles } : {}),       // "topic-slug" -> bundle manifest sha
+  ...(Object.keys(categories).length ? { categories } : {}), // "topic-slug" -> [app refs] (denormalized)
+  ...(Object.keys(collections).length ? { collections } : {}), // "slug" -> { title, description, members[] }
 };
 const { manifest: index } = finalizeManifest(indexCore, privateKey);
 

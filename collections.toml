@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-UEL
+# Copyright (C) 2026 And The Next GmbH - https://userland.run
+#
+# Curated collections — hand-picked workflow bundles, DISTINCT from the
+# auto-derived topic categories. A category groups apps by their `[bundle] topics`
+# (a browse facet); a collection is an intentional set someone curated (a
+# toolchain or workflow). publish.mjs reads this and emits the signed index's
+# `collections` map.
+#
+# Each [table] is one collection, keyed by its slug. `members` are app NAMES
+# (version-resolved against the current index at install time). Unknown members
+# are dropped with a warning at publish; an all-unknown collection is skipped.
+
+[node-dev]
+title = "Node dev toolchain"
+description = "Node.js, TypeScript, ESLint, Prettier"
+members = ["node", "typescript", "eslint", "prettier"]
+
+[git]
+title = "Git workflow"
+description = "gitoxide + delta diffs"
+members = ["gix", "delta"]
