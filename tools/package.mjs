@@ -171,6 +171,9 @@ for (const dir of buildDirs) {
     files,
     ...(topics.length ? { topics } : {}),
     ...(caveats.length ? { caveats } : {}),
+    // App recipe (deps/warmup/run/benignExitCodes/outputFilters) — app-specific
+    // provisioning data a generic SDK runner uses; signed with the manifest.
+    ...(recipe.recipe ? { recipe: recipe.recipe } : {}),
     conformance: {
       nano_min_version: nanoVersion,
       syscalls_used: Object.keys(verdict.syscalls || {}).map(Number).sort((a, b) => a - b),

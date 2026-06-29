@@ -16,6 +16,37 @@ argv = ["node"]
 path = "/usr/bin/node"
 env = { }
 
+# App recipe — app-specific provisioning carried in the signed manifest so a
+# generic SDK runner (provision()) can boot + run node with no node-specific code
+# in the SDK or the consuming app. Everything runtime-specific about node lives
+# here, as data.
+[recipe]
+# Node hits a libuv thread-join assertion on shutdown after a warm restore, AFTER
+# producing correct output — so the exit code is benign and the trace is noise.
+benignExitCodes = [134]
+outputFilters = ["WorkerThreadsTaskRunner", "Native stack trace", "Assertion failed: \\(0\\)"]
+
+[recipe.warmup]
+# Boot V8 once with this launcher, snapshot at the /dev/__snapshot__ sentinel, then
+# reuse the snapshot for fast runs. The launcher writes the sentinel, then reads +
+# executes the per-run payload at /dev/__run__.
+elfPath = "/usr/bin/node"
+launcherPath = "/launcher.js"
+launcher = """
+const fs = require('fs');
+fs.writeFileSync('/dev/__snapshot__', 'snap');
+const __s = fs.readFileSync('/dev/__run__', 'utf8');
+(new Function(__s))();
+"""
+argv = ["node", "/launcher.js"]
+env = { UV_THREADPOOL_SIZE = "0" }
+maxSteps = 2000000000
+
+[recipe.run]
+# How a run request becomes the /dev/__run__ payload.
+fileScript = "process.mainModule.require('${file}')"
+evalScript = "${code}"
+
 [maintainer]
 name = "userland.run"
 contact = "https://github.com/userland-run/catalog"
