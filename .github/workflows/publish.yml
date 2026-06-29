@@ -5,11 +5,17 @@ name: nano-app-publish
 # main, so untrusted PRs never reach the signing key — the trust boundary.
 
 on:
-  # Manual trigger: re-publish the index with no recipe changes (a "reindex").
-  # publish.mjs carries forward all prior apps + cas blobs, so a dispatch emits a
-  # complete new generation — used to ship index-only changes (categories,
-  # collections) without rebuilding any app.
+  # Manual trigger. With `recipes` empty: re-publish the index with no recipe
+  # changes (a "reindex") — publish.mjs carries forward all prior apps + cas blobs,
+  # emitting a complete new generation (index-only changes: categories, collections).
+  # With `recipes` set: force those recipes through build-test → re-package → publish,
+  # so e.g. node can be re-packaged to pick up a recipe.toml change without pushing.
   workflow_dispatch:
+    inputs:
+      recipes:
+        description: 'Recipes to rebuild + publish: "node", "node,busybox", or "*" for all. Empty = reindex only.'
+        required: false
+        default: ""
   pull_request:
     paths: ["recipes/**"]
   push:
@@ -35,15 +41,29 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.sha }}
+          DISPATCH_RECIPES: ${{ github.event_name == 'workflow_dispatch' && inputs.recipes || '' }}
         run: |
-          # Emit a JSON array of changed recipe names for the matrix. Recipes whose
-          # golden is still "TBD" are skipped — capture.yml captures the golden and
-          # commits it, which re-triggers this with a real golden to enforce.
+          # Emit a JSON array of recipe names for the matrix. Source: a manual
+          # workflow_dispatch `recipes` input (force-rebuild) if given, else the
+          # recipes this push/PR touched. Recipes whose golden is still "TBD" are
+          # skipped — capture.yml captures the golden + commits it, which re-triggers
+          # this with a real golden to enforce.
           range="${BASE}..${HEAD}"
           if ! git rev-parse "$BASE" >/dev/null 2>&1; then range="$HEAD"; fi  # first push / shallow
+          if [ -n "$DISPATCH_RECIPES" ]; then
+            if [ "$DISPATCH_RECIPES" = "*" ]; then
+              candidates=$(ls -d recipes/*/ 2>/dev/null | sed 's#recipes/##; s#/##')
+            else
+              candidates=$(printf '%s' "$DISPATCH_RECIPES" | tr ', ' '\n\n')
+            fi
+          else
+            candidates=$(git diff --name-only $range -- 'recipes/' | sed -n 's#^recipes/\([^/]*\)/.*#\1#p' | sort -u)
+          fi
           ready=""
-          for name in $(git diff --name-only $range -- 'recipes/' | sed -n 's#^recipes/\([^/]*\)/.*#\1#p' | sort -u); do
+          for name in $candidates; do
+            [ -z "$name" ] && continue
             case "$name" in _*) echo "skip $name: internal test recipe (not published)"; continue;; esac
+            if [ ! -d "recipes/$name" ]; then echo "skip $name: no such recipe"; continue; fi
             rj="recipes/$name/test/run.json"
             if [ -f "$rj" ] && grep -q '"stdoutSha256": *"TBD"' "$rj"; then
               echo "skip $name: golden not captured yet (TBD)"; continue
@@ -52,7 +72,7 @@ jobs:
           done
           arr=$(printf "%s" "$ready" | sed '/^$/d' | jq -R . | jq -cs .)
           echo "recipes=${arr:-[]}" >> "$GITHUB_OUTPUT"
-          echo "publishable changed recipes: ${arr:-[]}"
+          echo "publishable recipes: ${arr:-[]}"
 
   build-test:
     needs: changed
