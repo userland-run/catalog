@@ -4,8 +4,8 @@
 //
 // Stage 5 — Publish (spec §7). Turns the packaged output into two npm packages
 // that jsDelivr then serves as an immutable, content-addressed CDN:
-//   @nano-apps/cas@<gen>     the cas/<sha256> blobs (chunks + signed manifests)
-//   @nano-apps/index@<gen>   index.json: name@version → manifest sha, signed
+//   @userland-run/cas@<gen>     the cas/<sha256> blobs (chunks + signed manifests)
+//   @userland-run/nano-catalog@<gen>   index.json: name@version → manifest sha, signed
 //
 // Generation is monotonic: gen = (latest published index patch) + 1. Because each
 // generation is an immutable npm version, jsDelivr caches it forever; the client
@@ -14,7 +14,7 @@
 //
 // The cas package is cumulative within a generation: we carry forward the prior
 // generation's blobs so every chunk referenced by the current index is present
-// at @nano-apps/cas@<gen>. This keeps the client trivial (one generation to fetch
+// at @userland-run/cas@<gen>. This keeps the client trivial (one generation to fetch
 // from) at the cost of package growth; switch to the R2 mirror past npm's 100MB.
 //
 // Without NODE_AUTH_TOKEN (or with --dry-run) nothing is pushed: the npm package
@@ -64,7 +64,7 @@ function npmViewVersion(pkg) {
   try { return execFileSync("npm", ["view", pkg, "version"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
   catch { return null; }
 }
-const prevVer = npmViewVersion("@nano-apps/index@latest");
+const prevVer = npmViewVersion("@userland-run/nano-catalog@latest");
 const prevGen = prevVer ? Number(prevVer.split(".").pop()) : 0;
 const gen = (Number.isFinite(prevGen) ? prevGen : 0) + 1;
 const version = `0.0.${gen}`;
@@ -73,7 +73,7 @@ console.error(`generation: ${gen} (prev index version: ${prevVer || "none"})  �
 // --- Carry forward the prior index's app map ---
 async function fetchPrevIndex() {
   if (!prevVer) return {};
-  const url = `https://cdn.jsdelivr.net/npm/@nano-apps/index@${prevVer}/index.json`;
+  const url = `https://cdn.jsdelivr.net/npm/@userland-run/nano-catalog@${prevVer}/index.json`;
   try {
     const r = await fetch(url);
     if (!r.ok) return {};
@@ -90,7 +90,7 @@ function carryForwardCas() {
   try {
     mkdirSync(tmp, { recursive: true });
     // npm pack downloads the tarball; extract its package/cas/* into our casDir.
-    const tarName = execFileSync("npm", ["pack", `@nano-apps/cas@${prevVer}`, "--silent"], { cwd: tmp, encoding: "utf8" }).trim();
+    const tarName = execFileSync("npm", ["pack", `@userland-run/cas@${prevVer}`, "--silent"], { cwd: tmp, encoding: "utf8" }).trim();
     execFileSync("tar", ["xzf", tarName], { cwd: tmp });
     const prevCas = resolve(tmp, "package", "cas");
     if (existsSync(prevCas)) {
@@ -119,10 +119,10 @@ async function fetchPrevBundles() {
   const out = {}; // slug -> { topic, apps: Set<ref> }
   if (!prevVer) return out;
   try {
-    const idx = await (await fetch(`https://cdn.jsdelivr.net/npm/@nano-apps/index@${prevVer}/index.json`)).json();
+    const idx = await (await fetch(`https://cdn.jsdelivr.net/npm/@userland-run/nano-catalog@${prevVer}/index.json`)).json();
     for (const [slug, sha] of Object.entries(idx.bundles || {})) {
       try {
-        const bm = await (await fetch(`https://cdn.jsdelivr.net/npm/@nano-apps/cas@${prevVer}/cas/${sha}`)).json();
+        const bm = await (await fetch(`https://cdn.jsdelivr.net/npm/@userland-run/cas@${prevVer}/cas/${sha}`)).json();
         out[slug] = { topic: bm.topic || slug, apps: new Set(bm.apps || []) };
       } catch { /* skip a missing bundle */ }
     }
@@ -211,7 +211,7 @@ for (const sha of existsSync(casDir) ? readdirSync(casDir) : []) {
   blobCount++;
 }
 writeFileSync(resolve(casPkg, "package.json"), JSON.stringify({
-  name: "@nano-apps/cas", version,
+  name: "@userland-run/cas", version,
   description: "Content-addressed nano app chunks + manifests (served via jsDelivr).",
   license: "AGPL-3.0-only OR LicenseRef-UEL", files: ["cas"], publishConfig: { access: "public" },
 }, null, 2) + "\n");
@@ -219,7 +219,7 @@ writeFileSync(resolve(casPkg, "package.json"), JSON.stringify({
 // index package
 writeFileSync(resolve(indexPkg, "index.json"), JSON.stringify(index, null, 2) + "\n");
 writeFileSync(resolve(indexPkg, "package.json"), JSON.stringify({
-  name: "@nano-apps/index", version,
+  name: "@userland-run/nano-catalog", version,
   description: "Signed nano app catalog index (served via jsDelivr).",
   license: "AGPL-3.0-only OR LicenseRef-UEL", files: ["index.json"], publishConfig: { access: "public" },
 }, null, 2) + "\n");
@@ -242,4 +242,4 @@ for (const pkg of [casPkg, indexPkg]) {
 
 console.error(dryRun
   ? `\nDRY RUN complete (no NODE_AUTH_TOKEN or --dry-run). Inspect ${npmDir}. Generation would be ${gen}.`
-  : `\nPublished generation ${gen}: @nano-apps/cas@${version} + @nano-apps/index@${version}`);
+  : `\nPublished generation ${gen}: @userland-run/cas@${version} + @userland-run/nano-catalog@${version}`);
