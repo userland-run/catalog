@@ -6,7 +6,18 @@ it to a static RV64GC musl binary, runs it on the **real nano runtime headless**
 and — on merge — packages it into a signed, content-addressed artifact published
 to a CDN. No always-on backend.
 
+> 📚 **Documentation: <https://userland.run/docs/sdk-catalog>** (installing apps) and
+> [provisioning & recipes](https://userland.run/docs/sdk-provision). See also
+> [Part of userland.run](#part-of-userlandrun).
+
 > Specification: [`specs/nano/publish-pipeline.md`](https://github.com/userland-run/specs/blob/main/nano/publish-pipeline.md)
+
+There are currently **~48 published recipes** — BusyBox, Node.js, the TypeScript/ESLint/Prettier
+toolchain, and CLI tools like ripgrep, fd, bat, delta, jq/yq, just, tokei, and more. Some apps
+(notably `node`) carry an **AppRecipe** block in their signed manifest — a warmup/V8-snapshot
+launcher plus run-payload templates — so the SDK's generic `provision()` can install and run them
+with no app-specific code. Curated **collections** (`collections.toml`, e.g. `node-dev`, `git`)
+bundle related apps for one-call install.
 
 ## Layout
 
@@ -58,5 +69,25 @@ node tools/gate.mjs verdict.json tools/nano-syscalls.json
 node tools/package.mjs artifacts --out dist
 node tools/publish.mjs dist            # --dry-run unless NODE_AUTH_TOKEN is set
 ```
+
+## Consuming the catalog
+
+Apps are installed at runtime through the [SDK](https://github.com/userland-run/sdk): the
+`Catalog` client resolves the signed index from the CDN (jsDelivr by default — overridable for
+mirrors or tests), verifies the Ed25519 signature and content hashes, and writes the binary into
+the guest VFS. `nano.installApp("typescript")` then `nano.run("tsc --version")`, or
+`provision(new Catalog(), "node@25.4.0", …)` for the recipe-driven path.
+
+## Part of userland.run
+
+This is one repo in the **[userland.run](https://userland.run)** workspace:
+
+| Repo | What it is |
+| ---- | ---------- |
+| [nano](https://github.com/userland-run/nano) | The RV64GC → WASM emulator core (the runtime apps are conformance-tested against) |
+| [sdk](https://github.com/userland-run/sdk) | `@userland-run/nano-sdk` — installs + runs catalog apps (`Catalog`, `installApp`, `provision`) |
+| [terminal](https://github.com/userland-run/terminal) | `<nano-terminal>` web component with a built-in catalog browser |
+| **[catalog](https://github.com/userland-run/catalog)** | Signed app marketplace + publish pipeline — **this repo** |
+| [website](https://github.com/userland-run/website) | Landing page + the hosted docs at [userland.run/docs](https://userland.run/docs/) |
 
 Licensed AGPL-3.0-only OR LicenseRef-UEL — see [LICENSE.md](./LICENSE.md).
