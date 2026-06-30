@@ -78,6 +78,11 @@ mirrors or tests), verifies the Ed25519 signature and content hashes, and writes
 the guest VFS. `nano.installApp("typescript")` then `nano.run("tsc --version")`, or
 `provision(new Catalog(), "node@25.4.0", …)` for the recipe-driven path.
 
+The pipeline publishes two npm packages (served via jsDelivr, versioned `0.0.<generation>`):
+
+- **[`@userland-run/nano-catalog`](https://www.npmjs.com/package/@userland-run/nano-catalog)** — the signed `index.json` (`name@version → manifest sha`).
+- **[`@userland-run/cas`](https://www.npmjs.com/package/@userland-run/cas)** — the content-addressed `cas/<sha256>` blobs (gzipped chunks + signed manifests).
+
 ## Part of userland.run
 
 This is one repo in the **[userland.run](https://userland.run)** workspace:
