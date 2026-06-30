@@ -4,7 +4,7 @@
 //
 // Stage 5 — Publish (spec §7). Turns the packaged output into two npm packages
 // that jsDelivr then serves as an immutable, content-addressed CDN:
-//   @userland-run/cas@<gen>     the cas/<sha256> blobs (chunks + signed manifests)
+//   @userland-run/nano-cas@<gen>     the cas/<sha256> blobs (chunks + signed manifests)
 //   @userland-run/nano-catalog@<gen>   index.json: name@version → manifest sha, signed
 //
 // Generation is monotonic: gen = (latest published index patch) + 1. Because each
@@ -14,7 +14,7 @@
 //
 // The cas package is cumulative within a generation: we carry forward the prior
 // generation's blobs so every chunk referenced by the current index is present
-// at @userland-run/cas@<gen>. This keeps the client trivial (one generation to fetch
+// at @userland-run/nano-cas@<gen>. This keeps the client trivial (one generation to fetch
 // from) at the cost of package growth; switch to the R2 mirror past npm's 100MB.
 //
 // Without NODE_AUTH_TOKEN (or with --dry-run) nothing is pushed: the npm package
@@ -90,7 +90,7 @@ function carryForwardCas() {
   try {
     mkdirSync(tmp, { recursive: true });
     // npm pack downloads the tarball; extract its package/cas/* into our casDir.
-    const tarName = execFileSync("npm", ["pack", `@userland-run/cas@${prevVer}`, "--silent"], { cwd: tmp, encoding: "utf8" }).trim();
+    const tarName = execFileSync("npm", ["pack", `@userland-run/nano-cas@${prevVer}`, "--silent"], { cwd: tmp, encoding: "utf8" }).trim();
     execFileSync("tar", ["xzf", tarName], { cwd: tmp });
     const prevCas = resolve(tmp, "package", "cas");
     if (existsSync(prevCas)) {
@@ -122,7 +122,7 @@ async function fetchPrevBundles() {
     const idx = await (await fetch(`https://cdn.jsdelivr.net/npm/@userland-run/nano-catalog@${prevVer}/index.json`)).json();
     for (const [slug, sha] of Object.entries(idx.bundles || {})) {
       try {
-        const bm = await (await fetch(`https://cdn.jsdelivr.net/npm/@userland-run/cas@${prevVer}/cas/${sha}`)).json();
+        const bm = await (await fetch(`https://cdn.jsdelivr.net/npm/@userland-run/nano-cas@${prevVer}/cas/${sha}`)).json();
         out[slug] = { topic: bm.topic || slug, apps: new Set(bm.apps || []) };
       } catch { /* skip a missing bundle */ }
     }
@@ -211,7 +211,7 @@ for (const sha of existsSync(casDir) ? readdirSync(casDir) : []) {
   blobCount++;
 }
 writeFileSync(resolve(casPkg, "package.json"), JSON.stringify({
-  name: "@userland-run/cas", version,
+  name: "@userland-run/nano-cas", version,
   description: "Content-addressed nano app chunks + manifests (served via jsDelivr).",
   license: "AGPL-3.0-only OR LicenseRef-UEL", files: ["cas"], publishConfig: { access: "public" },
 }, null, 2) + "\n");
@@ -242,4 +242,4 @@ for (const pkg of [casPkg, indexPkg]) {
 
 console.error(dryRun
   ? `\nDRY RUN complete (no NODE_AUTH_TOKEN or --dry-run). Inspect ${npmDir}. Generation would be ${gen}.`
-  : `\nPublished generation ${gen}: @userland-run/cas@${version} + @userland-run/nano-catalog@${version}`);
+  : `\nPublished generation ${gen}: @userland-run/nano-cas@${version} + @userland-run/nano-catalog@${version}`);

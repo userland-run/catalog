@@ -81,7 +81,7 @@ the guest VFS. `nano.installApp("typescript")` then `nano.run("tsc --version")`,
 The pipeline publishes two npm packages (served via jsDelivr, versioned `0.0.<generation>`):
 
 - **[`@userland-run/nano-catalog`](https://www.npmjs.com/package/@userland-run/nano-catalog)** — the signed `index.json` (`name@version → manifest sha`).
-- **[`@userland-run/cas`](https://www.npmjs.com/package/@userland-run/cas)** — the content-addressed `cas/<sha256>` blobs (gzipped chunks + signed manifests).
+- **[`@userland-run/nano-cas`](https://www.npmjs.com/package/@userland-run/nano-cas)** — the content-addressed `cas/<sha256>` blobs (gzipped chunks + signed manifests).
 
 ## Part of userland.run
 
