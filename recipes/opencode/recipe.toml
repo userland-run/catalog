@@ -31,13 +31,23 @@ abi = "riscv64gc-linux-musl"
 # the timer still fires (no thread starvation), an injected GET is served
 # (HTTP/1.1 200 OK), node smoke 5/5, run_tests.sh unchanged.
 #
-# mDNS/UDP was a RED HERRING (not a blocker): the VM accepts SOCK_DGRAM sockets,
-# setsockopt is a success-stub (IP_ADD_MEMBERSHIP won't throw), and opencode
-# wraps Bonjour publish in try/catch + .on('error'), so the advertise fails
-# silently. NOTE: full `opencode serve` (the 16MB bundle) was NOT run end-to-end
-# this session — only a plain node server + timer were — but the blocker that
-# stalled it is resolved, so serve is now expected to reach listening; a live
-# end-to-end run is the remaining confirmation. The command path is unaffected.
+# mDNS/UDP was a RED HERRING (not a blocker): `serve --mdns` defaults to false,
+# and even when on the VM accepts SOCK_DGRAM sockets, setsockopt is a success-stub
+# (IP_ADD_MEMBERSHIP won't throw), and opencode wraps Bonjour publish in
+# try/catch + .on('error'), so the advertise fails silently.
+#
+# Full `opencode serve` (the 16MB bundle) WAS run end-to-end headless this
+# session. Past the busy-spin it hit ONE more real blocker: pwrite64 (68) /
+# pwritev (70) were missing from the host FS dispatch (pread64/preadv existed but
+# not their write mirrors), so SQLite's positioned DB-file writes returned ENOSYS
+# ("[NanoVM] unhandled FS syscall 68") and opencode's Effect-SQL migrations died
+# with "SQL logic error" / "cannot rollback". FIXED (nano container + SDK vendor);
+# file-backed node:sqlite now round-trips and serve gets past DB init with zero
+# SqlError. REMAINING: cold-load is too slow — after the sqlite fix serve runs
+# clean but does not reach listening within ~5min headless (V8 JIT-compiling the
+# 16MB bundle is pure compute in the interpreter). That is exactly what the warm
+# VM snapshot below is for; wiring a callable serve entry + snapshot is the next
+# step. The command path is unaffected.
 #
 # Off-VM build (produces the artifacts build.sh consumes): clone opencode, then
 # `bun install` and bundle a serve-only entry (yargs + ServeCommand only, 0
