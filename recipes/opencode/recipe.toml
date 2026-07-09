@@ -13,8 +13,10 @@ abi = "riscv64gc-linux-musl"
 # is Bun/@opentui-coupled and is NOT included. Networking to the model/registry is
 # via the guest's /dev/__net__ bridge (the loopback proxy nano-net-proxy.cjs).
 #
-# STATUS of `serve` in the emulator: `opencode --help` runs+conforms (golden
-# below). All the individually-diagnosed serve blockers are now FIXED in nano:
+# STATUS of `serve` in the emulator: WORKING (2026-07-09). `opencode serve`
+# reaches listening in ~68s headless and is functional — GET /config → 200 and
+# POST /session creates a real sqlite-backed session (verified). `--help` also
+# runs+conforms (golden below). All the diagnosed serve blockers are now FIXED:
 # file-backed node:sqlite (fcntl advisory-lock + fsync); WAL journalling
 # (build.sh rewrites it to DELETE — WAL needs -shm mmap the emulator lacks); the
 # mmap OOM (munmap now reclaims); and (2026-07-09) the event-loop busy-spin.
@@ -43,11 +45,18 @@ abi = "riscv64gc-linux-musl"
 # ("[NanoVM] unhandled FS syscall 68") and opencode's Effect-SQL migrations died
 # with "SQL logic error" / "cannot rollback". FIXED (nano container + SDK vendor);
 # file-backed node:sqlite now round-trips and serve gets past DB init with zero
-# SqlError. REMAINING: cold-load is too slow — after the sqlite fix serve runs
-# clean but does not reach listening within ~5min headless (V8 JIT-compiling the
-# 16MB bundle is pure compute in the interpreter). That is exactly what the warm
-# VM snapshot below is for; wiring a callable serve entry + snapshot is the next
-# step. The command path is unaffected.
+# SqlError. Then the LAST blocker: after DB init serve stalled 11+min in pure
+# compute before binding. Symbolized the hot guest pc (0x64e5xx, no-strip node +
+# nm bisect) → **v8::internal::MarkCompactCollector::MarkObjectsFromClientHeaps** —
+# it was V8 GARBAGE COLLECTION, not schema-gen. opencode's startup allocates
+# heavily → repeated Mark-Compact, and V8's default PARALLEL/CONCURRENT GC spawns
+# helper threads that thrash the emulator's thread scheduler (same failure mode as
+# the epoll ping-pong). FIX: run node with **--single-threaded-gc** (added to the
+# bin wrapper in build.sh) → the 11min wall collapses to ~10s and serve reaches
+# listening in ~68s. Heap-size flags (--max-semi-space-size/--max-old-space-size)
+# did NOT help — it's GC thread-coordination, not GC frequency. A warm VM snapshot
+# (below) would make it ~2s, but is now an optimization, not a requirement. The
+# command path is unaffected.
 #
 # Off-VM build (produces the artifacts build.sh consumes): clone opencode, then
 # `bun install` and bundle a serve-only entry (yargs + ServeCommand only, 0

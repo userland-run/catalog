@@ -81,9 +81,16 @@ cp nano-net-proxy.cjs "$LIB/"
 # (#sqlite -> node:sqlite, #pty -> the shim). Runs on the catalog `node`.
 # The preload starts the loopback proxy inside the same process (fork is
 # serialized in the VM — no separate proxy process).
+# --single-threaded-gc is REQUIRED for `serve`: opencode's startup allocates
+# heavily (schema/route graphs) → repeated V8 Mark-Compact GC, and V8's default
+# parallel/concurrent GC spawns helper threads that thrash the emulator's thread
+# scheduler (same failure mode as the epoll ping-pong). That turned serve's DB-to-
+# listen step into an 11+min compute wall (hot pc = MarkObjectsFromClientHeaps).
+# Forcing GC onto one thread collapses it: serve reaches listening in ~63s.
+# Harmless for the fast command paths (--help etc.).
 cat > out/usr/local/bin/opencode <<'SH'
 #!/bin/sh
-exec node --conditions=node --require /usr/local/lib/opencode/nano-net-proxy.cjs /usr/local/lib/opencode/index-nano.js "$@"
+exec node --single-threaded-gc --conditions=node --require /usr/local/lib/opencode/nano-net-proxy.cjs /usr/local/lib/opencode/index-nano.js "$@"
 SH
 chmod +x out/usr/local/bin/opencode
 
