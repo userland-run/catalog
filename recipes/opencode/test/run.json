@@ -1,0 +1,12 @@
+{
+  "cmd": ["node", "--conditions=node", "/usr/local/lib/opencode/index-nano.js", "--help"],
+  "env": { "HOME": "/root", "UV_THREADPOOL_SIZE": "0", "NODE_COMPILE_CACHE": "/root/.oc-ccache" },
+  "load": [],
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "8dbbcf929753671563082c0afa0782d71dd6e053fa062743adce4a0a63e3b5dc",
+    "maxInstructions": 60000000000,
+    "maxWallMs": 600000
+  },
+  "ramMb": 1800
+}

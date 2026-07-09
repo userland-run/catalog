@@ -89,7 +89,8 @@ export async function runPass({ wasmPath, elf, run, recipeDir, treeDir }) {
   const ramMb = Number(run.ramMb) > 0 ? Number(run.ramMb) : 1024;
   const RAM_SIZE = ramMb * 1024 * 1024;
   const ramPages = Math.max(3072, Math.floor(RAM_SIZE / 65536)); // >= module initial
-  const memory = new WebAssembly.Memory({ initial: ramPages, maximum: 32768, shared: true });
+  const slackPages = process.env.NANO_MEM_SLACK_PAGES ? Number(process.env.NANO_MEM_SLACK_PAGES) : 0;
+  const memory = new WebAssembly.Memory({ initial: ramPages + slackPages, maximum: 32768, shared: true });
 
   // Capture stdout/stderr as bytes (stdout is hashed for the golden compare).
   const stdoutChunks = [];
@@ -106,6 +107,22 @@ export async function runPass({ wasmPath, elf, run, recipeDir, treeDir }) {
         if (((v >>> 24) & 0xff) === 0x0a) {
           const nr = v & 0xffff;
           syscalls[nr] = (syscalls[nr] || 0) + 1;
+        } else if (process.env.NANO_DEBUG_FAULT && (((v >>> 24) & 0xff) >= 0x7a && ((v >>> 24) & 0xff) <= 0x7e)) {
+          // mem.rs dbg_check: 0x7A/0x7B/0x7C = addr bits 0-23/24-47/48-63,
+          // 0x7D/0x7E = guest pc bits 0-23/24-47
+          if (!globalThis.__oob) globalThis.__oob = { parts: {}, count: 0 };
+          const o = globalThis.__oob;
+          o.parts[(v >>> 24) & 0xff] = BigInt(v & 0xffffff);
+          if (((v >>> 24) & 0xff) === 0x7e && o.count < 12) {
+            const addr = (o.parts[0x7c] << 48n) | (o.parts[0x7b] << 24n) | o.parts[0x7a];
+            const pc = (o.parts[0x7e] << 24n) | o.parts[0x7d];
+            console.error(`[oob] guest access addr=0x${addr.toString(16)} pc=0x${pc.toString(16)}`);
+            o.count++;
+          }
+        } else if (process.env.NANO_DEBUG_FAULT && (((v >>> 24) & 0xff) === 0x1e || ((v >>> 24) & 0xff) === 0x1f)) {
+          // sys_mmap bump-allocator ENOMEM: 0x1E = next_addr KB, 0x1F = len KB
+          const kind = ((v >>> 24) & 0xff) === 0x1e ? "mmap ENOMEM next_addr" : "mmap ENOMEM len";
+          console.error(`[debug] ${kind} = ${(v & 0xffffff)} KB (${((v & 0xffffff) / 1024).toFixed(1)} MB)`);
         }
       },
       emscripten_random() { return rand(); },
@@ -184,6 +201,14 @@ export async function runPass({ wasmPath, elf, run, recipeDir, treeDir }) {
       X.vm_step(vmPtr, BUDGET);
     } catch (e) {
       faulted = true;
+      if (process.env.NANO_DEBUG_FAULT) {
+        console.error(`[fault] vm_step threw: ${e && e.message || e}; pc=0x${(X.debug_pc?.(vmPtr) ?? 0).toString(16)} fault_pc=0x${(X.debug_fault_pc?.(vmPtr) ?? 0).toString(16)} status=${X.debug_status(vmPtr)}`);
+        if (typeof X.debug_reg === "function") {
+          const names = ["zero","ra","sp","gp","tp","t0","t1","t2","s0","s1","a0","a1","a2","a3","a4","a5","a6","a7","s2","s3","s4","s5","s6","s7","s8","s9","s10","s11","t3","t4","t5","t6"];
+          const regs = names.map((n, i) => `${n}=0x${BigInt.asUintN(64, BigInt(X.debug_reg(vmPtr, i))).toString(16)}`);
+          console.error(`[fault] regs: ${regs.join(" ")}`);
+        }
+      }
       break;
     }
     const status = X.debug_status(vmPtr);
@@ -191,6 +216,8 @@ export async function runPass({ wasmPath, elf, run, recipeDir, treeDir }) {
     if (status === 3) {
       exitCode = X.vm_exit_code(vmPtr);
       if (X.debug_fault_pc(vmPtr) !== 0n && X.debug_fault_pc(vmPtr) !== 0) faulted = true;
+      if (faulted && process.env.NANO_DEBUG_FAULT)
+        console.error(`[fault] exit w/ fault_pc=0x${X.debug_fault_pc(vmPtr).toString(16)} exit=${exitCode}`);
       break;
     }
     if (status === 6) {
@@ -211,7 +238,12 @@ export async function runPass({ wasmPath, elf, run, recipeDir, treeDir }) {
       dv.setInt32(vmPtr + OFF_STATUS, 0, true);
       continue;
     }
-    if (status !== 0 && status !== 18) { faulted = true; break; }
+    if (status !== 0 && status !== 18) {
+      faulted = true;
+      if (process.env.NANO_DEBUG_FAULT)
+        console.error(`[fault] unexpected status=${status} pc=0x${(X.debug_pc?.(vmPtr) ?? 0).toString(16)} fault_pc=0x${(X.debug_fault_pc?.(vmPtr) ?? 0).toString(16)}`);
+      break;
+    }
   }
 
   instructions = totalInsns() || instructions;
@@ -227,6 +259,9 @@ export async function runPass({ wasmPath, elf, run, recipeDir, treeDir }) {
 function verdict({ loaded, exitCode, stdout, stderr, faulted, enosys, syscalls, instructions, wallMs, peakRamMb, budgetExceeded = false }) {
   const stdoutBytes = concat(stdout);
   const stderrBytes = concat(stderr);
+  if (process.env.NANO_DUMP_STDOUT) {
+    process.stderr.write("---- stdout ----\n" + new TextDecoder().decode(stdoutBytes) + "\n---- end ----\n");
+  }
   return {
     loaded,
     exitCode,

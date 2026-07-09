@@ -1,0 +1,84 @@
+name = "opencode"
+version = "1.17.15"
+abi = "riscv64gc-linux-musl"
+
+# opencode — the open-source AI coding agent (github.com/anomalyco/opencode),
+# packaged to run ON the guest `node` (install the `node` recipe too). This ships
+# opencode's *Node* bundle (serve-only, TUI-free) — NOT the upstream Bun binary,
+# which has no riscv64 build. The bundle + a trimmed node_modules install under
+# /usr/local/lib/opencode and a /usr/local/bin/opencode wrapper execs it on node.
+#
+# Run model: `opencode serve` exposes opencode's HTTP API; a client (the terminal)
+# drives it via vm.virtualServer.injectConnection(). The interactive `run`/TUI path
+# is Bun/@opentui-coupled and is NOT included. Networking to the model/registry is
+# via the guest's /dev/__net__ bridge (the loopback proxy nano-net-proxy.cjs).
+#
+# STATUS of `serve` in the emulator (2026-07-08): `opencode --help` runs+conforms
+# (golden below). `serve` does NOT yet reach "listening": three blockers were
+# fixed — file-backed node:sqlite (needed emulator fcntl advisory-lock + fsync
+# support, landed in nano), WAL journalling (build.sh rewrites it to DELETE — WAL
+# needs -shm mmap the emulator lacks), and the mmap OOM (emulator now reclaims
+# munmap'd regions) — but serve still stalls because the emulator's epoll_pwait
+# doesn't truly block, so libuv busy-spins, and serve advertises via mDNS/UDP
+# multicast the emulator can't do. Practical serve needs real epoll-timeout
+# blocking + UDP (or an mDNS opt-out). The command path is unaffected.
+#
+# Off-VM build (produces the artifacts build.sh consumes): clone opencode, then
+# `bun install` and bundle a serve-only entry (yargs + ServeCommand only, 0
+# @opentui refs) via `Bun.build({ target:"node", format:"esm",
+# external:["jsonc-parser","@lydell/node-pty"] })` → dist/cli/index-nano.js. Ship a
+# flat node_modules beside it: a node-pty shim (eager import must resolve; the
+# headless path never calls it) + real jsonc-parser. SQLite = Node built-in
+# `node:sqlite` (no native addon). See specs + the integration plan for the full
+# reproducible recipe.
+
+# Build-time only (never reach the runtime manifest): the packager walks out/ as a
+# guest-FS tree and conformance stages `node` + --tree out/.
+multifile = true
+runner = "node"
+
+[entrypoint]
+argv = ["opencode"]
+path = "/usr/local/bin/opencode"
+env = { }
+
+# App recipe — the only app-provisioning data carried into the signed manifest and
+# seen by the SDK runner (provision()). Inline tables must be single-line; the
+# catalog's minimal TOML reader (tools/lib/toml.mjs) has no dotted sub-tables or
+# multiline strings.
+[recipe]
+# ripgrep is required by opencode's grep tools and has no in-guest download path.
+deps = ["ripgrep"]
+# node hits a benign libuv thread-join assertion on shutdown AFTER correct output;
+# the exit code is noise and the trailing native-stack trace is filtered.
+benignExitCodes = [134]
+outputFilters = ["WorkerThreadsTaskRunner", "Native stack trace", "Assertion failed: \\(0\\)"]
+
+# NOTE (warmup / snapshot): cold-loading node + opencode's module graph is
+# ~6.7e9 guest instructions (~26 s headless; slower live), so a warm V8 snapshot
+# is the intended optimization. The MECHANISM is VERIFIED (2026-07-08): a launcher
+# that loads the graph (runs `--help` under a stubbed process.exit) then writes
+# /dev/__snapshot__ produces a 1.25 GB warm image; restoreAndRun injects
+# /dev/__run__ and executes it in ~2.4 s — an 11× wall-clock win, correct output,
+# benign exit 134 on teardown (WorkerThreadsTaskRunner assertion AFTER output).
+#   warmup ≈ { elfPath = "/usr/bin/node", launcherPath = "/oc-warm.js", launcher = "const fs=require('fs');globalThis.require=require;const x=process.exit.bind(process);process.exit=()=>{};process.argv=['node','/usr/local/lib/opencode/index-nano.js','--help'];import('/usr/local/lib/opencode/index-nano.js').catch(()=>{}).finally(()=>{process.exit=x;fs.writeFileSync('/dev/__snapshot__','snap');const s=fs.readFileSync('/dev/__run__','utf8');(new Function(s))();});", argv = ["node", "--conditions=node", "/oc-warm.js"], env = { UV_THREADPOOL_SIZE = "0", HOME = "/root", NODE_COMPILE_CACHE = "/root/.oc-ccache" }, maxSteps = 60000000000 }
+#
+# NOT YET WIRED for `serve` (the open follow-up): index-nano.js runs the yargs CLI
+# at TOP LEVEL on import (`…parse()`). After the warmup import runs `--help`, the
+# ESM module is cached and already-executed, so a /dev/__run__ payload that
+# re-imports it is a no-op — it cannot then launch `serve`. Two clean fixes:
+#   (a) rebuild the bundle off-VM with a callable entry (`export function main(argv)`
+#       + `if (import.meta.main) main(process.argv)`), so warmup imports to warm the
+#       graph WITHOUT running, and the run payload calls `main(['serve', …])`; or
+#   (b) snapshot a LIVE listening server (warmup runs `serve`, writes the snapshot
+#       once it's listening) and have restore RESUME the event loop — needs a
+#       resume-style restore, not the inject-fresh-payload path.
+# Until then the opencode adapter (terminal) cold-starts serve via writeStdin —
+# correct, just slow on first launch; the snapshot is a pure speedup on top.
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.opencode"]
