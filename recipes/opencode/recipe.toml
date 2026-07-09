@@ -82,8 +82,11 @@ env = { }
 # catalog's minimal TOML reader (tools/lib/toml.mjs) has no dotted sub-tables or
 # multiline strings.
 [recipe]
-# ripgrep is required by opencode's grep tools and has no in-guest download path.
-deps = ["ripgrep"]
+# opencode shells out to these: ripgrep (grep tool), fd (glob/file finder), and
+# git (status/diff/log + `check-ignore --stdin` for gitignore-aware file listing
+# during context build — required before the first chat turn completes). A shell
+# and coreutils (grep/find/ls) come from the bundled busybox.
+deps = ["ripgrep", "fd", "git"]
 # node hits a benign libuv thread-join assertion on shutdown AFTER correct output;
 # the exit code is noise and the trailing native-stack trace is filtered.
 benignExitCodes = [134]
