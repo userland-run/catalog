@@ -13,15 +13,20 @@ abi = "riscv64gc-linux-musl"
 # is Bun/@opentui-coupled and is NOT included. Networking to the model/registry is
 # via the guest's /dev/__net__ bridge (the loopback proxy nano-net-proxy.cjs).
 #
-# STATUS of `serve` in the emulator (2026-07-08): `opencode --help` runs+conforms
-# (golden below). `serve` does NOT yet reach "listening": three blockers were
-# fixed — file-backed node:sqlite (needed emulator fcntl advisory-lock + fsync
-# support, landed in nano), WAL journalling (build.sh rewrites it to DELETE — WAL
-# needs -shm mmap the emulator lacks), and the mmap OOM (emulator now reclaims
-# munmap'd regions) — but serve still stalls because the emulator's epoll_pwait
-# doesn't truly block, so libuv busy-spins, and serve advertises via mDNS/UDP
-# multicast the emulator can't do. Practical serve needs real epoll-timeout
-# blocking + UDP (or an mDNS opt-out). The command path is unaffected.
+# STATUS of `serve` in the emulator: `opencode --help` runs+conforms (golden
+# below). `serve` does NOT yet reach "listening", but the blocker list is down to
+# one. FIXED: file-backed node:sqlite (emulator fcntl advisory-lock + fsync,
+# landed in nano); WAL journalling (build.sh rewrites it to DELETE — WAL needs
+# -shm mmap the emulator lacks); the mmap OOM (emulator now reclaims munmap'd
+# regions); and (2026-07-09) the epoll busy-spin — sys_epoll_pwait now hands its
+# timeout to the host (new `vm_epoll_timeout_ms` export) and the container run
+# loop truly parks an idle listening server until a connection is injected, the
+# libuv next-timer deadline elapses, or stdin arrives, instead of spin-polling
+# the event loop (which pinned the tab at 100% CPU). Same fix mirrored into the
+# SDK's vendored VM. Unit-verified; live `opencode serve` browser verify PENDING.
+# REMAINING blocker: serve advertises via mDNS/UDP multicast
+# (dgram/udp4/5353/Bonjour) the emulator can't do — needs a UDP stub or an mDNS
+# opt-out (a bundle/build.sh patch). The command path is unaffected.
 #
 # Off-VM build (produces the artifacts build.sh consumes): clone opencode, then
 # `bun install` and bundle a serve-only entry (yargs + ServeCommand only, 0
