@@ -54,9 +54,17 @@ abi = "riscv64gc-linux-musl"
 # the epoll ping-pong). FIX: run node with **--single-threaded-gc** (added to the
 # bin wrapper in build.sh) → the 11min wall collapses to ~10s and serve reaches
 # listening in ~68s. Heap-size flags (--max-semi-space-size/--max-old-space-size)
-# did NOT help — it's GC thread-coordination, not GC frequency. A warm VM snapshot
-# (below) would make it ~2s, but is now an optimization, not a requirement. The
-# command path is unaffected.
+# did NOT help — it's GC thread-coordination, not GC frequency.
+#
+# WARM SNAPSHOT of `serve` now WORKS (2026-07-09): a --require preload writes
+# /dev/__snapshot__ the instant opencode is about to bind :4096 (past the GC
+# wall, before the bind); snapshotApp captures it and restoreAndRun resumes to a
+# LISTENING /config=200 server in ~14s vs ~68s cold. This needed the emulator to
+# persist not just guest RAM but the host-side socket table (vm_sockets_ptr/size)
+# AND the event-loop statics (vm_evloop_dump/load: epoll interest list, eventfd,
+# timerfd) across restore — restore's reset zeroes them, and without them the
+# resumed libuv loop watched an empty epoll set and hung. The command path is
+# unaffected.
 #
 # Off-VM build (produces the artifacts build.sh consumes): clone opencode, then
 # `bun install` and bundle a serve-only entry (yargs + ServeCommand only, 0
