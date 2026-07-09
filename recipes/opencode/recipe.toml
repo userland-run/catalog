@@ -106,6 +106,15 @@ deps = ["ripgrep", "fd", "git"]
 benignExitCodes = [134]
 outputFilters = ["WorkerThreadsTaskRunner", "Native stack trace", "Assertion failed: \\(0\\)"]
 
+# Warm-snapshot launcher for `serve`: boot node on the serve bundle with
+# --single-threaded-gc (required — see the GC note above) + the loopback net
+# proxy, and capture the snapshot the moment the server answers GET /config with
+# 200 (routes + handler + block cache warm). The `ready` probe makes the runner
+# use snapshotAppReady (host-driven) instead of a guest /dev/__snapshot__ sentinel
+# — a guest can't loopback to its own listener. A fresh-VM restore of this
+# snapshot reaches a serviceable server in ~0.4-2s vs ~68s cold.
+warmup = { elfPath = "/usr/bin/node", argv = ["node", "--single-threaded-gc", "--conditions=node", "--require", "/usr/local/lib/opencode/nano-net-proxy.cjs", "/usr/local/lib/opencode/index-nano.js", "serve", "--port", "4096", "--hostname", "127.0.0.1"], env = { UV_THREADPOOL_SIZE = "0", HOME = "/root", NANO_NET_TARGET = "http://nanoinfer.internal" }, maxSteps = 80000000000, ready = { port = 4096, path = "/config", status = 200 } }
+
 # NOTE (warmup / snapshot): cold-loading node + opencode's module graph is
 # ~6.7e9 guest instructions (~26 s headless; slower live), so a warm V8 snapshot
 # is the intended optimization. The MECHANISM is VERIFIED (2026-07-08): a launcher
