@@ -14,19 +14,30 @@ abi = "riscv64gc-linux-musl"
 # via the guest's /dev/__net__ bridge (the loopback proxy nano-net-proxy.cjs).
 #
 # STATUS of `serve` in the emulator: `opencode --help` runs+conforms (golden
-# below). `serve` does NOT yet reach "listening", but the blocker list is down to
-# one. FIXED: file-backed node:sqlite (emulator fcntl advisory-lock + fsync,
-# landed in nano); WAL journalling (build.sh rewrites it to DELETE — WAL needs
-# -shm mmap the emulator lacks); the mmap OOM (emulator now reclaims munmap'd
-# regions); and (2026-07-09) the epoll busy-spin — sys_epoll_pwait now hands its
-# timeout to the host (new `vm_epoll_timeout_ms` export) and the container run
-# loop truly parks an idle listening server until a connection is injected, the
-# libuv next-timer deadline elapses, or stdin arrives, instead of spin-polling
-# the event loop (which pinned the tab at 100% CPU). Same fix mirrored into the
-# SDK's vendored VM. Unit-verified; live `opencode serve` browser verify PENDING.
-# REMAINING blocker: serve advertises via mDNS/UDP multicast
-# (dgram/udp4/5353/Bonjour) the emulator can't do — needs a UDP stub or an mDNS
-# opt-out (a bundle/build.sh patch). The command path is unaffected.
+# below). All the individually-diagnosed serve blockers are now FIXED in nano:
+# file-backed node:sqlite (fcntl advisory-lock + fsync); WAL journalling
+# (build.sh rewrites it to DELETE — WAL needs -shm mmap the emulator lacks); the
+# mmap OOM (munmap now reclaims); and (2026-07-09) the event-loop busy-spin.
+#
+# The busy-spin was the real one. Root cause (measured, not the earlier "epoll
+# doesn't block" guess): node's event loop runs on TWO idle EPOLL_WAIT threads,
+# and the VM scheduler's find_runnable kept context-switching each eventless
+# epoll_pwait to the *other* idle epoll thread — an infinite ping-pong (614k
+# epoll_pwait + 1.2M clock_gettime in 3s, 100% CPU, host never reached). Fixed by
+# gating that path so an eventless wait with no progressable peer yields to the
+# host (STATUS_EPOLL_BLOCKED); the host then truly parks (vm_epoll_timeout_ms +
+# _parkServer, mirrored into the SDK vendor). VERIFIED headlessly on the real
+# container: idle CPU 100%->0% for both a bare node http server AND a setTimeout,
+# the timer still fires (no thread starvation), an injected GET is served
+# (HTTP/1.1 200 OK), node smoke 5/5, run_tests.sh unchanged.
+#
+# mDNS/UDP was a RED HERRING (not a blocker): the VM accepts SOCK_DGRAM sockets,
+# setsockopt is a success-stub (IP_ADD_MEMBERSHIP won't throw), and opencode
+# wraps Bonjour publish in try/catch + .on('error'), so the advertise fails
+# silently. NOTE: full `opencode serve` (the 16MB bundle) was NOT run end-to-end
+# this session — only a plain node server + timer were — but the blocker that
+# stalled it is resolved, so serve is now expected to reach listening; a live
+# end-to-end run is the remaining confirmation. The command path is unaffected.
 #
 # Off-VM build (produces the artifacts build.sh consumes): clone opencode, then
 # `bun install` and bundle a serve-only entry (yargs + ServeCommand only, 0
