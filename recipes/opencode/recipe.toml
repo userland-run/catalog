@@ -113,7 +113,12 @@ outputFilters = ["WorkerThreadsTaskRunner", "Native stack trace", "Assertion fai
 # use snapshotAppReady (host-driven) instead of a guest /dev/__snapshot__ sentinel
 # — a guest can't loopback to its own listener. A fresh-VM restore of this
 # snapshot reaches a serviceable server in ~0.4-2s vs ~68s cold.
-warmup = { elfPath = "/usr/bin/node", argv = ["node", "--single-threaded-gc", "--conditions=node", "--require", "/usr/local/lib/opencode/nano-net-proxy.cjs", "/usr/local/lib/opencode/index-nano.js", "serve", "--port", "4096", "--hostname", "127.0.0.1"], env = { UV_THREADPOOL_SIZE = "0", HOME = "/root", NANO_NET_TARGET = "http://nanoinfer.internal" }, maxSteps = 80000000000, ready = { port = 4096, path = "/config", status = 200 } }
+# A prebuilt `snapshot` (opencode.snapshot.gz, produced off-VM by build-snapshot.mjs
+# — snapshotAppReady capture → serialize → gzip) is preferred when provision() is
+# given a snapshotFetcher: it loads in ~1s and restores a serviceable server in
+# ~3s, skipping the ~68s live warmup build. The argv/env/ready below stay as the
+# live-build fallback (and are what build-snapshot.mjs replays to produce the gz).
+warmup = { elfPath = "/usr/bin/node", argv = ["node", "--single-threaded-gc", "--conditions=node", "--require", "/usr/local/lib/opencode/nano-net-proxy.cjs", "/usr/local/lib/opencode/index-nano.js", "serve", "--port", "4096", "--hostname", "127.0.0.1"], env = { UV_THREADPOOL_SIZE = "0", HOME = "/root", NANO_NET_TARGET = "http://nanoinfer.internal" }, maxSteps = 80000000000, ready = { port = 4096, path = "/config", status = 200 }, snapshot = "opencode.snapshot.gz" }
 
 # NOTE (warmup / snapshot): cold-loading node + opencode's module graph is
 # ~6.7e9 guest instructions (~26 s headless; slower live), so a warm V8 snapshot
