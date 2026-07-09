@@ -1,0 +1,33 @@
+name = "git"
+version = "2.47.1"
+abi = "riscv64gc-linux-musl"
+
+# Minimal static git — core builtins only (status, diff, log, ls-files,
+# check-ignore, rev-parse, config, init, add, commit, hash-object, worktree).
+# Cross-compiled with `zig cc` + musl and NO_OPENSSL / NO_CURL / NO_EXPAT /
+# NO_TCLTK / NO_GETTEXT / NO_PYTHON / NO_PERL, so the only deps are a bundled
+# static zlib + musl libc → one static RV64GC ELF. The network transports
+# (http/https via curl) are intentionally dropped; opencode uses git purely for
+# LOCAL repo introspection: `check-ignore --no-index --stdin` for gitignore-aware
+# file listing during context build, plus diff/status/blame/log tools.
+#
+# NOTE: git's build runs feature-detection test programs, which cannot execute
+# under cross-compilation — build.sh answers them via config.mak. Expect the
+# CI build to need one or two iterations on those cache vars.
+
+[source]
+git = "https://github.com/git/git"
+rev = "v2.47.1"
+
+[entrypoint]
+argv = ["git"]
+# All the subcommands opencode uses are builtins dispatched from the single
+# binary, so no GIT_EXEC_PATH / templates are required at runtime.
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.git"]

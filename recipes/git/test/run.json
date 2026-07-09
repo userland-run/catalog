@@ -1,0 +1,13 @@
+{
+  "cmd": ["git", "hash-object", "/in/hello.txt"],
+  "env": { "LANG": "C" },
+  "load": [
+    { "from": "fixtures/hello.txt", "to": "/in/hello.txt" }
+  ],
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "dd0753ef33fd4783991aefecc2ad2a1b6a40176ca8731dbd3410daf1a8d478be",
+    "maxInstructions": 2000000000,
+    "maxWallMs": 30000
+  }
+}
