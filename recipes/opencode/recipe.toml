@@ -56,15 +56,21 @@ abi = "riscv64gc-linux-musl"
 # listening in ~68s. Heap-size flags (--max-semi-space-size/--max-old-space-size)
 # did NOT help — it's GC thread-coordination, not GC frequency.
 #
-# WARM SNAPSHOT of `serve` now WORKS (2026-07-09): a --require preload writes
-# /dev/__snapshot__ the instant opencode is about to bind :4096 (past the GC
-# wall, before the bind); snapshotApp captures it and restoreAndRun resumes to a
-# LISTENING /config=200 server in ~14s vs ~68s cold. This needed the emulator to
-# persist not just guest RAM but the host-side socket table (vm_sockets_ptr/size)
-# AND the event-loop statics (vm_evloop_dump/load: epoll interest list, eventfd,
-# timerfd) across restore — restore's reset zeroes them, and without them the
-# resumed libuv loop watched an empty epoll set and hung. The command path is
-# unaffected.
+# WARM SNAPSHOT of `serve` WORKS — ~1.9s fresh-VM restore vs ~68s cold (~36x,
+# 2026-07-09). This needed the emulator to persist, across restore, host-side
+# state that the restore reset zeroes: the socket table (vm_sockets_ptr/size),
+# the event-loop statics (vm_evloop_dump/load: epoll interest list, eventfd,
+# timerfd — without them the resumed libuv loop watched an empty epoll set and
+# hung), and the decoded-block cache (vm_blocks_ptr/size — without it the guest
+# re-decodes its code cold, the dominant cost). Host-side restore setup is only
+# ~250ms (1.3GB RAM memcpy is trivial); the win is warm blocks + not re-running
+# init.
+# CAPTURE TIMING MATTERS: snapshot when serve is actually READY (drive it to
+# GET /config → 200, i.e. routes registered + the config handler warm), NOT at
+# the 'listening' event — a 'listening' snapshot restores in ~14s because
+# opencode's route/OpenAPI setup isn't done yet and re-runs on resume. Verified
+# single-VM (the real deploy shape) restoring into a FRESH VM. The command path
+# is unaffected.
 #
 # Off-VM build (produces the artifacts build.sh consumes): clone opencode, then
 # `bun install` and bundle a serve-only entry (yargs + ServeCommand only, 0
