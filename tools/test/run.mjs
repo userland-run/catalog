@@ -75,6 +75,16 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error(`
   const { publicKey: otherPub } = generateKeyPairSync("ed25519");
   const otherRaw = Buffer.from(otherPub.export({ format: "jwk" }).x, "base64url").toString("base64");
   ok(verifyManifest(manifest, loadPublicKeyRaw(otherRaw)).ok === false, "manifest: rejects a different key");
+
+  // A `kind` field (wasm-tier D1) is covered by canonicalization on both sides
+  // (package.mjs signs it; the SDK verifies over the same sorted-key form).
+  const wasmCore = { name: "wtool", version: "2.0.0", kind: "wasm-app", abi: "wasm32-wasip1", files: [{ path: "/usr/bin/wtool.wasm", chunks: ["aa"] }], size: 8 };
+  const { manifest: wm } = finalizeManifest(wasmCore, privateKey);
+  ok(wm.kind === "wasm-app", "manifest: kind carried through finalize");
+  ok(verifyManifest(wm, pub).ok === true, "manifest: kind is signature-consistent (verifies)");
+  const wmTampered = JSON.parse(JSON.stringify(wm));
+  wmTampered.kind = "elf-app";
+  ok(verifyManifest(wmTampered, pub).ok === false, "manifest: tampering kind breaks the signature");
 }
 
 console.log(`\ncatalog lib tests: ${pass} passed, ${fail} failed`);

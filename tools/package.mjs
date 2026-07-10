@@ -73,6 +73,9 @@ function writeCas(bytes) {
 }
 
 const isElf = (b) => b.length >= 4 && b[0] === 0x7f && b[1] === 0x45 && b[2] === 0x4c && b[3] === 0x46;
+// WebAssembly magic: "\0asm" (wasm-tier D1) — a wasm-app/-service/-component
+// binary. Never ELF-stripped; packaged and gzipped as-is.
+const isWasm = (b) => b.length >= 4 && b[0] === 0x00 && b[1] === 0x61 && b[2] === 0x73 && b[3] === 0x6d;
 
 // Package one file → a manifest `files[]` entry (strip if ELF, gzip, FastCDC-chunk).
 function packageFile(absPath, installPath, mode) {
@@ -143,6 +146,15 @@ for (const dir of buildDirs) {
   // Single-binary recipe → one file at its install path. Multi-file recipe
   // (e.g. typescript) → walk out/ as a guest-FS-rooted tree (out/usr/bin/node →
   // /usr/bin/node), one files[] entry per file, lazily installable per-file.
+  // Artifact tier (wasm-tier D1): explicit `kind` in the recipe wins; otherwise
+  // infer from a single-binary recipe's magic (wasm → wasm-app, else elf-app).
+  // Multi-file recipes must declare `kind` (no single binary to sniff).
+  const VALID_KINDS = ["elf-app", "wasm-app", "wasm-service", "wasm-component"];
+  let kind = recipe.kind;
+  if (kind && !VALID_KINDS.includes(kind)) { console.error(`skip ${recipeName}: unknown kind "${kind}"`); continue; }
+  if (!kind && binary) kind = isWasm(readFileSync(binary)) ? "wasm-app" : "elf-app";
+  if (!kind) kind = "elf-app";
+
   let files;
   if (recipe.multifile) {
     files = [...walkFiles(outRoot)].map((f) => packageFile(f.abs, "/" + f.rel, f.mode));
@@ -163,10 +175,14 @@ for (const dir of buildDirs) {
     ? Object.entries(recipe.caveats).filter(([, v]) => v === true).map(([k]) => k).sort()
     : [];
 
+  const defaultAbi = kind === "elf-app" ? "riscv64gc-linux-musl" : "wasm32-wasip1";
   const manifestCore = {
     name: recipe.name || recipeName,
     version: String(recipe.version ?? "0.0.0"),
-    abi: recipe.abi || "riscv64gc-linux-musl",
+    // `kind` is emitted only when non-default so existing elf-app manifests stay
+    // byte-identical (absent ⇒ "elf-app"; see manifestKind() in the SDK).
+    ...(kind !== "elf-app" ? { kind } : {}),
+    abi: recipe.abi || defaultAbi,
     entrypoint: { argv: recipe.entrypoint?.argv || [recipeName], env: recipe.entrypoint?.env || {} },
     files,
     ...(topics.length ? { topics } : {}),
