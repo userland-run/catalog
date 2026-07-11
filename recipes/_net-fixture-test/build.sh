@@ -6,7 +6,7 @@
 #
 # Sourcing (first hit wins):
 #   1. $NANO_IMAGES/busybox            (local dev)
-#   2. ../../../nano/images/busybox    (sibling nano checkout)
+#   2. ../../../nano/runners/riscv/images/busybox    (sibling nano checkout)
 #   3. $NANO_RELEASE/busybox           (CI: a nano release asset)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -14,8 +14,8 @@ mkdir -p out
 src=""
 if [ -n "${NANO_IMAGES:-}" ] && [ -f "$NANO_IMAGES/busybox" ]; then
   src="$NANO_IMAGES/busybox"
-elif [ -f "../../../nano/images/busybox" ]; then
-  src="../../../nano/images/busybox"
+elif [ -f "../../../nano/runners/riscv/images/busybox" ]; then
+  src="../../../nano/runners/riscv/images/busybox"
 fi
 if [ -n "$src" ]; then
   cp "$src" out/busybox

@@ -33,7 +33,7 @@ let bin = getOpt("--bin");
 let tree = getOpt("--tree");
 if (recipe.runner === "node") {
   // runner=node recipes load the node ELF + stage their tree.
-  bin = bin || process.env.NANO_NODE || resolve(ROOT, "../nano/images/node");
+  bin = bin || process.env.NANO_NODE || resolve(ROOT, "../nano/runners/riscv/images/node");
   tree = tree || outRoot;
 } else if (!bin) {
   for (const f of readdirSync(outRoot)) {

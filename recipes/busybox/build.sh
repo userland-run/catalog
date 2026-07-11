@@ -3,7 +3,7 @@
 #
 # Sourcing (first hit wins):
 #   1. $NANO_IMAGES/busybox            (local dev: point at nano/images)
-#   2. a sibling ../../../nano/images/busybox checkout
+#   2. a sibling ../../../nano/runners/riscv/images/busybox checkout
 #   3. $NANO_RELEASE/busybox           (CI: a nano release asset)
 # A from-source build (zig + musl) is a follow-up.
 set -euo pipefail
@@ -13,8 +13,8 @@ mkdir -p out
 src=""
 if [ -n "${NANO_IMAGES:-}" ] && [ -f "$NANO_IMAGES/busybox" ]; then
   src="$NANO_IMAGES/busybox"
-elif [ -f "../../../nano/images/busybox" ]; then
-  src="../../../nano/images/busybox"
+elif [ -f "../../../nano/runners/riscv/images/busybox" ]; then
+  src="../../../nano/runners/riscv/images/busybox"
 fi
 
 if [ -n "$src" ]; then

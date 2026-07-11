@@ -3,7 +3,7 @@
 #
 # Sourcing (first hit wins):
 #   1. $NANO_IMAGES/node               (local dev: point at nano/images)
-#   2. a sibling ../../../nano/images/node checkout
+#   2. a sibling ../../../nano/runners/riscv/images/node checkout
 #   3. $NANO_RELEASE/node              (CI: a nano release asset)
 # The from-source build lives in nano/build/node-riscv/Dockerfile (relocating here
 # is a follow-up); for now the recipe vendors that Dockerfile's output.
@@ -14,8 +14,8 @@ mkdir -p out
 src=""
 if [ -n "${NANO_IMAGES:-}" ] && [ -f "$NANO_IMAGES/node" ]; then
   src="$NANO_IMAGES/node"
-elif [ -f "../../../nano/images/node" ]; then
-  src="../../../nano/images/node"
+elif [ -f "../../../nano/runners/riscv/images/node" ]; then
+  src="../../../nano/runners/riscv/images/node"
 fi
 
 if [ -n "$src" ]; then
