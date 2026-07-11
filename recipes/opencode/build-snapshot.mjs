@@ -29,7 +29,7 @@ const NANO_ROOT = resolve(CATALOG_ROOT, "../nano");
 
 const wasmPath = process.env.NANOVM_WASM || resolve(NANO_ROOT, "wasm/nano.wasm");
 const nodePath = process.env.NANO_NODE || resolve(NANO_ROOT, "images/node");
-const containerPath = process.env.NANO_CONTAINER || resolve(NANO_ROOT, "container/nanovm.mjs");
+const containerPath = process.env.NANO_CONTAINER || resolve(NANO_ROOT, "runners/riscv/host/nanovm.mjs");
 for (const [label, p] of [["NANOVM_WASM", wasmPath], ["NANO_NODE", nodePath], ["NANO_CONTAINER", containerPath]]) {
   if (!existsSync(p)) { console.error(`${label} not found: ${p}`); process.exit(2); }
 }
