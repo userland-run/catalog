@@ -28,6 +28,11 @@ permissions:
 env:
   NANO_VERSION: "0.1.0"
   NANO_RELEASE: "https://github.com/userland-run/nano/releases/download/v0.1.0"
+  # nano.wasm + boa.wasm for the non-elf tiers (capture-verdict). Pinned to v0.2.0,
+  # whose released assets are verified compatible with the SDK's wasm/boa runners
+  # (^0.2.5) — kept separate so the RISC-V recipes keep their v0.1.0 goldens.
+  # Unify with NANO_RELEASE once the elf recipes are re-baselined onto v0.2.0.
+  NANO_WASM_RELEASE: "https://github.com/userland-run/nano/releases/download/v0.2.0"
 
 jobs:
   changed:
@@ -133,11 +138,10 @@ jobs:
           curl -fsSL "$NANO_RELEASE/nano.trace.wasm"    -o nano.trace.wasm
           curl -fsSL "$NANO_RELEASE/nano-syscalls.json" -o nano-syscalls.json
           # Non-elf tiers conform via capture-verdict, which runs the app on its own
-          # runner: nano.wasm (emulator core, for the wasm-app runner) + boa.wasm.
-          # These must ship in the nano release and be compatible with the SDK
-          # version in package.json (bump NANO_RELEASE if a tier is unsupported).
-          curl -fsSL "$NANO_RELEASE/nano.wasm" -o nano.wasm || echo "::warning::nano.wasm not in $NANO_RELEASE — wasm/boa recipes can't conform"
-          curl -fsSL "$NANO_RELEASE/boa.wasm"  -o boa.wasm  || echo "::warning::boa.wasm not in $NANO_RELEASE — boa recipes can't conform"
+          # runner: nano.wasm (emulator core, for the wasm-app runner) + boa.wasm,
+          # from NANO_WASM_RELEASE (verified compatible with the SDK's runners).
+          curl -fsSL "$NANO_WASM_RELEASE/nano.wasm" -o nano.wasm || echo "::warning::nano.wasm not in $NANO_WASM_RELEASE — wasm/boa recipes can't conform"
+          curl -fsSL "$NANO_WASM_RELEASE/boa.wasm"  -o boa.wasm  || echo "::warning::boa.wasm not in $NANO_WASM_RELEASE — boa recipes can't conform"
           # Drift guard: the pinned set must match the released runtime.
           if ! diff -q <(jq -S '.supported' nano-syscalls.json) <(jq -S '.supported' tools/nano-syscalls.json) >/dev/null; then
             echo "::error::tools/nano-syscalls.json is out of sync with nano $NANO_VERSION — re-pin it"; exit 1

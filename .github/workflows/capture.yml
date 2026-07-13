@@ -20,6 +20,8 @@ permissions:
 
 env:
   NANO_RELEASE: https://github.com/userland-run/nano/releases/download/v0.1.0
+  # nano.wasm + boa.wasm for the non-elf tiers (capture-verdict) — see publish.yml.
+  NANO_WASM_RELEASE: https://github.com/userland-run/nano/releases/download/v0.2.0
 
 jobs:
   # Emit the JSON array of recipes whose golden is still TBD.
@@ -76,8 +78,8 @@ jobs:
           curl -fsSL "$NANO_RELEASE/node"          -o node-runtime || true
           # nano.wasm + boa.wasm let capture-golden dispatch non-elf kinds to
           # capture-verdict (wasm/node/boa run on their own runner).
-          curl -fsSL "$NANO_RELEASE/nano.wasm" -o nano.wasm || echo "::warning::nano.wasm not in $NANO_RELEASE — wasm/boa recipes can't be captured"
-          curl -fsSL "$NANO_RELEASE/boa.wasm"  -o boa.wasm  || echo "::warning::boa.wasm not in $NANO_RELEASE — boa recipes can't be captured"
+          curl -fsSL "$NANO_WASM_RELEASE/nano.wasm" -o nano.wasm || echo "::warning::nano.wasm not in $NANO_WASM_RELEASE — wasm/boa recipes can't be captured"
+          curl -fsSL "$NANO_WASM_RELEASE/boa.wasm"  -o boa.wasm  || echo "::warning::boa.wasm not in $NANO_WASM_RELEASE — boa recipes can't be captured"
 
       # capture-verdict (the non-elf path) imports @userland-run/nano-sdk.
       - name: Install deps

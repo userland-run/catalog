@@ -17,6 +17,8 @@ permissions:
 env:
   NANO_VERSION: "0.1.0"
   NANO_RELEASE: "https://github.com/userland-run/nano/releases/download/v0.1.0"
+  # nano.wasm + boa.wasm for the non-elf tiers — see publish.yml.
+  NANO_WASM_RELEASE: "https://github.com/userland-run/nano/releases/download/v0.2.0"
 
 jobs:
   discover:
@@ -75,8 +77,8 @@ jobs:
         run: |
           curl -fsSL "$NANO_RELEASE/nano.min.wasm"   -o nano.min.wasm
           curl -fsSL "$NANO_RELEASE/nano.trace.wasm" -o nano.trace.wasm
-          curl -fsSL "$NANO_RELEASE/nano.wasm" -o nano.wasm || echo "::warning::nano.wasm not in $NANO_RELEASE — wasm/boa recipes can't conform"
-          curl -fsSL "$NANO_RELEASE/boa.wasm"  -o boa.wasm  || echo "::warning::boa.wasm not in $NANO_RELEASE — boa recipes can't conform"
+          curl -fsSL "$NANO_WASM_RELEASE/nano.wasm" -o nano.wasm || echo "::warning::nano.wasm not in $NANO_WASM_RELEASE — wasm/boa recipes can't conform"
+          curl -fsSL "$NANO_WASM_RELEASE/boa.wasm"  -o boa.wasm  || echo "::warning::boa.wasm not in $NANO_WASM_RELEASE — boa recipes can't conform"
 
       # [2] Conformance on real nano: plain (golden) then trace (syscall coverage).
       # `runner = "node"` recipes load the node ELF + stage their tree (--tree).
