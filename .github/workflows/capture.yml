@@ -74,6 +74,14 @@ jobs:
         run: |
           curl -fsSL "$NANO_RELEASE/nano.min.wasm" -o nano.min.wasm
           curl -fsSL "$NANO_RELEASE/node"          -o node-runtime || true
+          # nano.wasm + boa.wasm let capture-golden dispatch non-elf kinds to
+          # capture-verdict (wasm/node/boa run on their own runner).
+          curl -fsSL "$NANO_RELEASE/nano.wasm" -o nano.wasm || echo "::warning::nano.wasm not in $NANO_RELEASE — wasm/boa recipes can't be captured"
+          curl -fsSL "$NANO_RELEASE/boa.wasm"  -o boa.wasm  || echo "::warning::boa.wasm not in $NANO_RELEASE — boa recipes can't be captured"
+
+      # capture-verdict (the non-elf path) imports @userland-run/nano-sdk.
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
 
       - name: Build + capture ${{ matrix.recipe }}
         id: cap
@@ -81,10 +89,12 @@ jobs:
         run: |
           r="recipes/${{ matrix.recipe }}"
           bash "$r/build.sh"
+          # capture-golden routes elf-app → nano-conformance (NANOVM_WASM) and
+          # non-elf kinds → capture-verdict (NANO_WASM_DIR → nano.wasm + boa.wasm).
           if grep -q 'runner *= *"node"' "$r/recipe.toml"; then
-            NANOVM_WASM=nano.min.wasm node tools/capture-golden.mjs "${{ matrix.recipe }}" --bin node-runtime --tree "$r/out"
+            NANOVM_WASM=nano.min.wasm NANO_WASM_DIR="$PWD" node tools/capture-golden.mjs "${{ matrix.recipe }}" --bin node-runtime --tree "$r/out"
           else
-            NANOVM_WASM=nano.min.wasm node tools/capture-golden.mjs "${{ matrix.recipe }}"
+            NANOVM_WASM=nano.min.wasm NANO_WASM_DIR="$PWD" node tools/capture-golden.mjs "${{ matrix.recipe }}"
           fi
 
       - name: Upload captured golden

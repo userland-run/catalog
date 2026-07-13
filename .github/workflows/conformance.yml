@@ -69,27 +69,41 @@ jobs:
         run: bash recipes/${{ matrix.recipe }}/build.sh
 
       # Fetch the matching nano runtime builds (plain + trace), same as publish.yml.
+      # nano.wasm + boa.wasm let capture-verdict conform non-elf tiers on their own
+      # runner (see publish.yml for the release-compatibility note).
       - name: Fetch nano runtime
         run: |
           curl -fsSL "$NANO_RELEASE/nano.min.wasm"   -o nano.min.wasm
           curl -fsSL "$NANO_RELEASE/nano.trace.wasm" -o nano.trace.wasm
+          curl -fsSL "$NANO_RELEASE/nano.wasm" -o nano.wasm || echo "::warning::nano.wasm not in $NANO_RELEASE — wasm/boa recipes can't conform"
+          curl -fsSL "$NANO_RELEASE/boa.wasm"  -o boa.wasm  || echo "::warning::boa.wasm not in $NANO_RELEASE — boa recipes can't conform"
 
       # [2] Conformance on real nano: plain (golden) then trace (syscall coverage).
       # `runner = "node"` recipes load the node ELF + stage their tree (--tree).
       - name: Conformance
         run: |
           r=recipes/${{ matrix.recipe }}
-          if grep -q 'runner *= *"node"' "$r/recipe.toml"; then
-            curl -fsSL "$NANO_RELEASE/node" -o node-runtime
-            bin=node-runtime; tree="--tree $r/out"
-          else
-            bin=$(find "$r/out" -type f -perm -u+x | head -1); tree=""
-          fi
-          echo "binary: $bin $tree"
-          NANOVM_WASM=nano.min.wasm \
-            node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --report verdict.json
-          NANOVM_WASM=nano.trace.wasm \
-            node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --trace --merge verdict.json
+          kind=$(sed -n 's/^[[:space:]]*kind[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$r/recipe.toml" | head -1)
+          case "$kind" in
+            wasm-app|wasm-service|wasm-component|node-app|boa-app)
+              # Non-RISC-V tier: conform on its own runner (SDK dep + nano.wasm/boa.wasm).
+              npm ci --no-audit --no-fund
+              NANO_WASM_DIR="$PWD" node tools/capture-verdict.mjs "${{ matrix.recipe }}" --out verdict.json
+              ;;
+            *)
+              if grep -q 'runner *= *"node"' "$r/recipe.toml"; then
+                curl -fsSL "$NANO_RELEASE/node" -o node-runtime
+                bin=node-runtime; tree="--tree $r/out"
+              else
+                bin=$(find "$r/out" -type f -perm -u+x | head -1); tree=""
+              fi
+              echo "binary: $bin $tree"
+              NANOVM_WASM=nano.min.wasm \
+                node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --report verdict.json
+              NANOVM_WASM=nano.trace.wasm \
+                node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --trace --merge verdict.json
+              ;;
+          esac
 
       # [3] Map the verdict → one contract result (the gate decides passed/failed;
       # a gate rejection is recorded as status "failed", it does not fail the job).

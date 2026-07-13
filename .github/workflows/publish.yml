@@ -118,6 +118,10 @@ jobs:
         run: |
           r=recipes/${{ matrix.recipe }}
           if grep -q 'multifile *= *true' "$r/recipe.toml"; then echo "multifile recipe — skip ELF validation"; exit 0; fi
+          # Non-RISC-V tiers (wasm/node/boa) are not RISC-V ELFs — skip.
+          if grep -qE '^[[:space:]]*kind[[:space:]]*=[[:space:]]*"(wasm-app|wasm-service|wasm-component|node-app|boa-app)"' "$r/recipe.toml"; then
+            echo "non-elf kind — skip ELF validation"; exit 0
+          fi
           bin=$(find "$r/out" -type f -perm -u+x | head -1)
           echo "binary: $bin"
           tools/validate-elf.sh "$bin"
@@ -128,6 +132,12 @@ jobs:
           curl -fsSL "$NANO_RELEASE/nano.min.wasm"      -o nano.min.wasm
           curl -fsSL "$NANO_RELEASE/nano.trace.wasm"    -o nano.trace.wasm
           curl -fsSL "$NANO_RELEASE/nano-syscalls.json" -o nano-syscalls.json
+          # Non-elf tiers conform via capture-verdict, which runs the app on its own
+          # runner: nano.wasm (emulator core, for the wasm-app runner) + boa.wasm.
+          # These must ship in the nano release and be compatible with the SDK
+          # version in package.json (bump NANO_RELEASE if a tier is unsupported).
+          curl -fsSL "$NANO_RELEASE/nano.wasm" -o nano.wasm || echo "::warning::nano.wasm not in $NANO_RELEASE — wasm/boa recipes can't conform"
+          curl -fsSL "$NANO_RELEASE/boa.wasm"  -o boa.wasm  || echo "::warning::boa.wasm not in $NANO_RELEASE — boa recipes can't conform"
           # Drift guard: the pinned set must match the released runtime.
           if ! diff -q <(jq -S '.supported' nano-syscalls.json) <(jq -S '.supported' tools/nano-syscalls.json) >/dev/null; then
             echo "::error::tools/nano-syscalls.json is out of sync with nano $NANO_VERSION — re-pin it"; exit 1
@@ -139,17 +149,28 @@ jobs:
       - name: Conformance
         run: |
           r=recipes/${{ matrix.recipe }}
-          if grep -q 'runner *= *"node"' "$r/recipe.toml"; then
-            curl -fsSL "$NANO_RELEASE/node" -o node-runtime
-            bin=node-runtime; tree="--tree $r/out"
-          else
-            bin=$(find "$r/out" -type f -perm -u+x | head -1); tree=""
-          fi
-          NANOVM_WASM=nano.min.wasm \
-            node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --report verdict.json
-          NANOVM_WASM=nano.trace.wasm \
-            node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --trace --merge verdict.json
-          node tools/gate.mjs verdict.json nano-syscalls.json --recipe "$r"
+          kind=$(sed -n 's/^[[:space:]]*kind[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$r/recipe.toml" | head -1)
+          case "$kind" in
+            wasm-app|wasm-service|wasm-component|node-app|boa-app)
+              # Non-RISC-V tier: conform on its own runner (SDK dep + nano.wasm/boa.wasm).
+              # The syscall gate is RISC-V-only, so it does not apply here.
+              npm ci --no-audit --no-fund
+              NANO_WASM_DIR="$PWD" node tools/capture-verdict.mjs "${{ matrix.recipe }}" --out verdict.json
+              ;;
+            *)
+              if grep -q 'runner *= *"node"' "$r/recipe.toml"; then
+                curl -fsSL "$NANO_RELEASE/node" -o node-runtime
+                bin=node-runtime; tree="--tree $r/out"
+              else
+                bin=$(find "$r/out" -type f -perm -u+x | head -1); tree=""
+              fi
+              NANOVM_WASM=nano.min.wasm \
+                node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --report verdict.json
+              NANOVM_WASM=nano.trace.wasm \
+                node tools/nano-conformance.mjs "$bin" --recipe "$r" $tree --trace --merge verdict.json
+              node tools/gate.mjs verdict.json nano-syscalls.json --recipe "$r"
+              ;;
+          esac
 
       - uses: actions/upload-artifact@v4
         with:
