@@ -1,0 +1,21 @@
+{
+  "cmd": [
+    "photon",
+    "tiny.png",
+    "out.png",
+    "--filter",
+    "grayscale"
+  ],
+  "env": {},
+  "cwd": "/in",
+  "load": [
+    {
+      "from": "fixtures/tiny.png",
+      "to": "/in/tiny.png"
+    }
+  ],
+  "expect": {
+    "exitCode": 0,
+    "maxWallMs": 15000
+  }
+}

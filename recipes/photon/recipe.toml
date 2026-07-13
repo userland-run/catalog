@@ -1,0 +1,26 @@
+name = "photon"
+version = "0.1.0"
+# A wasm32-wasip1 command that runs on the nano `wasm` runner (host wasm engine),
+# NOT a RISC-V ELF on the emulator. `kind` tells the SDK/terminal to register it
+# on the wasm-app tier; the packager carries it into the signed manifest.
+kind = "wasm-app"
+abi = "wasm32-wasip1"
+
+# A tiny image-processing CLI in the spirit of Photon (silvia-odwyer/photon),
+# built on the pure-Rust `image` crate so it compiles cleanly to wasip1.
+
+[source]
+git = "https://github.com/userland-run/nano"
+rev = "main"
+# Source subtree: apps/core/build/photon (built by build.sh below).
+
+[entrypoint]
+argv = ["photon"]
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.photon"]
