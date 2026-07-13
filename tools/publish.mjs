@@ -70,16 +70,24 @@ const gen = (Number.isFinite(prevGen) ? prevGen : 0) + 1;
 const version = `0.0.${gen}`;
 console.error(`generation: ${gen} (prev index version: ${prevVer || "none"})  → npm version ${version}`);
 
-// --- Carry forward the prior index's app map ---
+// --- Carry forward the prior index's app map + per-app tier metadata ---
 async function fetchPrevIndex() {
-  if (!prevVer) return {};
+  if (!prevVer) return { apps: {}, appMeta: {} };
   const url = `https://cdn.jsdelivr.net/npm/@userland-run/nano-catalog@${prevVer}/index.json`;
   try {
     const r = await fetch(url);
-    if (!r.ok) return {};
+    if (!r.ok) return { apps: {}, appMeta: {} };
     const j = await r.json();
-    return j.apps || {};
-  } catch { return {}; }
+    return { apps: j.apps || {}, appMeta: j.appMeta || {} };
+  } catch { return { apps: {}, appMeta: {} }; }
+}
+
+// Execution tier (runner) an artifact kind runs on — mirrors the SDK's kindToTier.
+function tierOf(kind) {
+  if (kind === "wasm-app" || kind === "wasm-service" || kind === "wasm-component") return "wasm";
+  if (kind === "node-app") return "node";
+  if (kind === "boa-app") return "boa";
+  return "riscv"; // elf-app (default)
 }
 
 // --- Carry forward the prior cas blobs (cumulative cas package) ---
@@ -107,8 +115,18 @@ function carryForwardCas() {
   return added;
 }
 
-const apps = await fetchPrevIndex();
-for (const rec of records) apps[`${rec.name}@${rec.version}`] = rec.manifestSha;
+const { apps, appMeta } = await fetchPrevIndex();
+for (const rec of records) {
+  const ref = `${rec.name}@${rec.version}`;
+  apps[ref] = rec.manifestSha;
+  const kind = rec.kind || "elf-app";
+  appMeta[ref] = { tier: tierOf(kind), kind, abi: rec.abi || (kind === "elf-app" ? "riscv64gc-linux-musl" : "wasm32-wasip1") };
+}
+// Legacy apps carried forward from a pre-tier index have no meta ⇒ they are all
+// RISC-V elf-apps (the only tier that existed then), so default them accordingly.
+for (const ref of Object.keys(apps)) {
+  if (!appMeta[ref]) appMeta[ref] = { tier: "riscv", kind: "elf-app", abi: "riscv64gc-linux-musl" };
+}
 const carried = carryForwardCas();
 console.error(`apps in index: ${Object.keys(apps).length} (carried forward ${carried} prior cas blob(s))`);
 
@@ -190,6 +208,7 @@ const indexCore = {
   generation: gen,
   nano_min_version: nanoVersion,
   apps,                       // "name@version" -> manifest sha256 (a cas blob)
+  appMeta,                    // "name@version" -> { tier, kind, abi } (execution tier, denormalized)
   ...(Object.keys(bundles).length ? { bundles } : {}),       // "topic-slug" -> bundle manifest sha
   ...(Object.keys(categories).length ? { categories } : {}), // "topic-slug" -> [app refs] (denormalized)
   ...(Object.keys(collections).length ? { collections } : {}), // "slug" -> { title, description, members[] }

@@ -19,18 +19,40 @@ launcher plus run-payload templates — so the SDK's generic `provision()` can i
 with no app-specific code. Curated **collections** (`collections.toml`, e.g. `node-dev`, `git`)
 bundle related apps for one-call install.
 
+## Runner tiers
+
+Every app targets one **execution tier** (runner), declared by the manifest's
+`kind` and carried into the signed index as `appMeta` (`{tier, kind, abi}`), so a
+client can group and badge apps by runner without fetching each manifest:
+
+| `kind`         | tier    | ABI                    | runs on                              |
+| -------------- | ------- | ---------------------- | ------------------------------------ |
+| `elf-app`      | `riscv` | `riscv64gc-linux-musl` | the RISC-V VM (emulated CPU) — default |
+| `node-app`     | `node`  | `nodejs`               | the host Node engine (trusted)       |
+| `wasm-app`     | `wasm`  | `wasm32-wasip1`        | the wasm runner (host wasm engine)   |
+| `boa-app`      | `boa`   | `javascript`           | the Boa sandbox (interpreted JS)     |
+
+`kind` is inferred for a single-binary recipe (wasm magic → `wasm-app`, else
+`elf-app`) or declared explicitly in `recipe.toml`; it is absent from a manifest
+only when it's the default `elf-app`. Each tier conforms on its **own** runner
+(see below), not the emulator.
+
 ## Layout
 
 ```
 recipes/<name>/
-  recipe.toml          identity, source, entrypoint, maintainer
-  build.sh             produces ./out/<binary> (static RV64GC ELF)
+  recipe.toml          identity, source, entrypoint, maintainer, kind
+  build.sh             produces ./out/<binary> for the recipe's kind:
+                       a static RV64GC ELF, a wasm32-wasip1 module, or a JS file
+  src/                 in-repo source for node/boa apps (staged by build.sh)
   test/
     run.json           conformance invocation + expected result
     fixtures/          input files staged into the guest VFS
 tools/
-  validate-elf.sh      pre-flight static / arch checks
-  nano-conformance.mjs headless nano runner → JSON verdict
+  validate-elf.sh      pre-flight static / arch checks (elf-app)
+  nano-conformance.mjs headless nano runner → JSON verdict (elf-app, RISC-V VM)
+  capture-golden.mjs   capture a recipe's golden; dispatches non-elf kinds ↓
+  capture-verdict.mjs  run wasm/node/boa apps on their own runner → JSON verdict
   gate.mjs             pass/fail on the 5 conformance checks
   package.mjs          strip, gzip, chunk, hash, sign, manifest
   publish.mjs          npm (→ jsDelivr) submission + index/generation bump
@@ -60,7 +82,13 @@ No binary reaches the catalog without passing on the runtime users actually run.
 # Validate an ELF is static RV64GC baseline:
 tools/validate-elf.sh recipes/<name>/out/<binary>
 
-# Run conformance (needs nano.min.wasm + nano.trace.wasm from the nano release):
+# Capture a recipe's golden — routes by kind automatically:
+#   elf-app  → nano-conformance on the RISC-V VM (needs nano.min.wasm)
+#   non-elf  → capture-verdict on the app's own runner (needs nano.wasm + boa.wasm)
+NANOVM_WASM=../nano/wasm/nano.min.wasm NANO_WASM_DIR=../nano/wasm \
+  node tools/capture-golden.mjs <name>
+
+# Or run the elf-app conformance directly:
 NANO_VERSION=0.1.0 node tools/nano-conformance.mjs recipes/<name>/out/<binary> \
   --recipe recipes/<name> --report verdict.json
 node tools/gate.mjs verdict.json tools/nano-syscalls.json

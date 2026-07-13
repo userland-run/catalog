@@ -21,6 +21,7 @@
     "publish-catalog": "node tools/publish.mjs",
     "test": "node tools/test/run.mjs"
   },
-  "dependencies": {},
-  "devDependencies": {}
+  "devDependencies": {
+    "@userland-run/nano-sdk": "^0.2.5"
+  }
 }

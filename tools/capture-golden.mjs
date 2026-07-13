@@ -22,12 +22,38 @@ const args = process.argv.slice(3);
 const getOpt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
 if (!name) { console.error("usage: capture-golden.mjs <recipe> [--bin path] [--tree dir]"); process.exit(2); }
 
-const wasm = process.env.NANOVM_WASM || resolve(ROOT, "../nano/wasm/nano.min.wasm");
-if (!existsSync(wasm)) { console.error(`NANOVM_WASM not found: ${wasm} (set NANOVM_WASM)`); process.exit(2); }
-
 const recipeDir = resolve(ROOT, "recipes", name);
 const recipe = parseToml(readFileSync(resolve(recipeDir, "recipe.toml"), "utf8"));
 const outRoot = resolve(recipeDir, "out");
+
+// Non-RISC-V tiers don't run on the emulator — dispatch to capture-verdict.mjs,
+// which runs the app on its own runner (wasm / host Node / Boa) and produces the
+// same verdict shape. Then patch the recipe's golden exactly as the elf path does.
+// (capture-verdict resolves nano.wasm + boa.wasm from --wasm-dir / NANO_WASM_DIR.)
+const NON_ELF_KINDS = ["wasm-app", "wasm-service", "wasm-component", "node-app", "boa-app"];
+if (NON_ELF_KINDS.includes(recipe.kind)) {
+  const vp = resolve(ROOT, ".capture-verdict.json");
+  try {
+    execFileSync("node", [resolve(ROOT, "tools/capture-verdict.mjs"), name, "--out", vp], { stdio: ["ignore", "inherit", "inherit"], env: process.env });
+  } catch { /* capture-verdict exits non-zero on a faulted run; handled below */ }
+  if (!existsSync(vp)) { console.error(`capture-verdict produced no verdict for ${name}`); process.exit(1); }
+  const v = JSON.parse(readFileSync(vp, "utf8"));
+  const runPath = resolve(recipeDir, "test/run.json");
+  const run = JSON.parse(readFileSync(runPath, "utf8"));
+  const want = run.expect?.exitCode ?? 0;
+  if (v.faulted || v.exitCode !== want) {
+    console.error(`conformance failed for ${name} (${recipe.kind}): exit=${v.exitCode} want=${want} faulted=${v.faulted} — leaving golden TBD`);
+    process.exit(1);
+  }
+  run.expect.stdoutSha256 = v.stdoutSha256;
+  writeFileSync(runPath, JSON.stringify(run, null, 2) + "\n");
+  console.error(`captured ${name} (${recipe.kind}): exit ${v.exitCode}, sha ${v.stdoutSha256} → ${runPath}`);
+  process.exit(0);
+}
+
+// elf-app path: conform the RISC-V binary on the emulator.
+const wasm = process.env.NANOVM_WASM || resolve(ROOT, "../nano/wasm/nano.min.wasm");
+if (!existsSync(wasm)) { console.error(`NANOVM_WASM not found: ${wasm} (set NANOVM_WASM)`); process.exit(2); }
 
 let bin = getOpt("--bin");
 let tree = getOpt("--tree");

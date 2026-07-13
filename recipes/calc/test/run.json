@@ -1,0 +1,13 @@
+{
+  "cmd": [
+    "calc"
+  ],
+  "env": {},
+  "cwd": "/in",
+  "load": [],
+  "expect": {
+    "exitCode": 0,
+    "maxWallMs": 5000,
+    "stdoutSha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0"
+  }
+}

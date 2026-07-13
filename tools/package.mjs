@@ -149,7 +149,7 @@ for (const dir of buildDirs) {
   // Artifact tier (wasm-tier D1): explicit `kind` in the recipe wins; otherwise
   // infer from a single-binary recipe's magic (wasm → wasm-app, else elf-app).
   // Multi-file recipes must declare `kind` (no single binary to sniff).
-  const VALID_KINDS = ["elf-app", "wasm-app", "wasm-service", "wasm-component"];
+  const VALID_KINDS = ["elf-app", "wasm-app", "wasm-service", "wasm-component", "node-app", "boa-app"];
   let kind = recipe.kind;
   if (kind && !VALID_KINDS.includes(kind)) { console.error(`skip ${recipeName}: unknown kind "${kind}"`); continue; }
   if (!kind && binary) kind = isWasm(readFileSync(binary)) ? "wasm-app" : "elf-app";
@@ -175,7 +175,15 @@ for (const dir of buildDirs) {
     ? Object.entries(recipe.caveats).filter(([, v]) => v === true).map(([k]) => k).sort()
     : [];
 
-  const defaultAbi = kind === "elf-app" ? "riscv64gc-linux-musl" : "wasm32-wasip1";
+  const DEFAULT_ABI = {
+    "elf-app": "riscv64gc-linux-musl",
+    "wasm-app": "wasm32-wasip1",
+    "wasm-service": "wasm32-wasip1",
+    "wasm-component": "wasm32-wasip1",
+    "node-app": "nodejs",     // runs on the host Node engine (arch-agnostic)
+    "boa-app": "javascript",  // sandboxed JS on the Boa interpreter
+  };
+  const defaultAbi = DEFAULT_ABI[kind] || "riscv64gc-linux-musl";
   const manifestCore = {
     name: recipe.name || recipeName,
     version: String(recipe.version ?? "0.0.0"),
@@ -203,7 +211,9 @@ for (const dir of buildDirs) {
   const { manifest, bytes } = finalizeManifest(manifestCore, privateKey);
   const manifestSha = writeCas(bytes);  // signed manifest stored as a cas blob
 
-  records.push({ name: manifest.name, version: manifest.version, manifestSha, size: manifest.size, ...(topics.length ? { topics } : {}) });
+  // Carry kind + abi in the record so publish.mjs can denormalize the execution
+  // tier into the index (appMeta) without re-reading each manifest.
+  records.push({ name: manifest.name, version: manifest.version, manifestSha, size: manifest.size, kind, abi: manifest.abi, ...(topics.length ? { topics } : {}) });
   console.error(`packaged ${manifest.name}@${manifest.version}: ${files.length} file(s), ${totalChunks} chunk(s), ` +
     `gz ${(totalGz / 1024 / 1024).toFixed(2)}MB, manifest ${manifestSha.slice(0, 12)}…`);
 }

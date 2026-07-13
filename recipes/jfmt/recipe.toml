@@ -1,0 +1,26 @@
+name = "jfmt"
+version = "1.0.0"
+# A JavaScript CLI that runs on the nano `node` runner (the HOST Node engine —
+# trusted, near-native), NOT a RISC-V ELF on the emulator. `kind` routes it to
+# the node-app tier; the packager carries it into the signed manifest.
+kind = "node-app"
+abi = "nodejs"
+
+# jfmt — pretty-print a JSON file (2-space indent). Pure JS, zero dependencies;
+# the source lives in this recipe's src/ and build.sh stages it verbatim.
+
+[source]
+git = "https://github.com/userland-run/catalog"
+rev = "main"
+# Source subtree: recipes/jfmt/src (staged by build.sh below).
+
+[entrypoint]
+argv = ["jfmt"]
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.jfmt"]

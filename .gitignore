@@ -7,3 +7,4 @@ verdict.json
 recipes/*/out/
 recipes/*/.build/
 .DS_Store
+.capture-verdict.json

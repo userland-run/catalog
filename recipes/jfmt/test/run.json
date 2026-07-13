@@ -1,0 +1,19 @@
+{
+  "cmd": [
+    "jfmt",
+    "sample.json"
+  ],
+  "env": {},
+  "cwd": "/in",
+  "load": [
+    {
+      "from": "fixtures/sample.json",
+      "to": "/in/sample.json"
+    }
+  ],
+  "expect": {
+    "exitCode": 0,
+    "maxWallMs": 5000,
+    "stdoutSha256": "ed0b8b526bf58876aeaa6c83d1aec2c574d04223f5fe0ce02fc8da027fb8bde4"
+  }
+}

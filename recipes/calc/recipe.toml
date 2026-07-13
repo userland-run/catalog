@@ -1,0 +1,26 @@
+name = "calc"
+version = "1.0.0"
+# A sandboxed JavaScript app that runs on the nano `boa` runner (the Boa
+# interpreter — capability-scoped, no ambient authority), NOT a RISC-V ELF.
+# `kind` routes it to the boa-app tier; the packager signs it into the manifest.
+kind = "boa-app"
+abi = "javascript"
+
+# calc — evaluate an arithmetic expression. Pure ECMAScript, no host APIs, so it
+# runs unchanged in the Boa sandbox. Source lives in src/; build.sh stages it.
+
+[source]
+git = "https://github.com/userland-run/catalog"
+rev = "main"
+# Source subtree: recipes/calc/src (staged by build.sh below).
+
+[entrypoint]
+argv = ["calc"]
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.calc"]

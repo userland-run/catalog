@@ -16,6 +16,7 @@
   ],
   "expect": {
     "exitCode": 0,
-    "maxWallMs": 15000
+    "maxWallMs": 15000,
+    "stdoutSha256": "097c1a5993a7cabfc3a3192ccd1814d9ef2509001ce2fca85b42977445b74583"
   }
 }
