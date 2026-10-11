@@ -3,3 +3,14 @@
 name = "nano-cors-proxy"
 main = "worker.js"
 compatibility_date = "2026-06-01"
+
+[vars]
+# Comma-separated browser Origins allowed to use the proxy (exact match, scheme +
+# host [+ port]), e.g. "https://userland.run,https://www.userland.run".
+# EMPTY = FAIL CLOSED: every request is refused until you set this. Note that
+# `wrangler deploy` overwrites dashboard-set vars with the values in this file.
+ALLOWED_ORIGINS = "https://userland.run"
+# "true" forwards the caller's Authorization header upstream (private-repo clone,
+# git push). Off by default: only enable on a proxy you operate yourself, since
+# the operator can see those credentials.
+FORWARD_AUTHORIZATION = "false"

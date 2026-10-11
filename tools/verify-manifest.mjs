@@ -21,8 +21,12 @@ const pubPath = process.argv[3] || resolve(root, "keys/catalog.pub");
 if (!file || !existsSync(file)) { console.error("usage: verify-manifest.mjs <json> [catalog.pub]"); process.exit(2); }
 if (!existsSync(pubPath)) { console.error(`public key not found: ${pubPath}`); process.exit(2); }
 
-const obj = JSON.parse(readFileSync(file, "utf8"));
-const publicKey = loadPublicKeyRaw(readFileSync(pubPath, "utf8"));
+let obj, publicKey;
+try { obj = JSON.parse(readFileSync(file, "utf8")); }
+catch (e) { console.error(`INVALID: ${file} is not valid JSON (${e.message})`); process.exit(1); }
+if (!obj || typeof obj !== "object" || Array.isArray(obj)) { console.error(`INVALID: ${file} is not a JSON object`); process.exit(1); }
+try { publicKey = loadPublicKeyRaw(readFileSync(pubPath, "utf8")); }
+catch (e) { console.error(`bad public key ${pubPath}: ${e.message}`); process.exit(2); }
 
 const { ok, reason } = verifyManifest(obj, publicKey);
 if (ok) { console.log(`OK: signature + content hash valid (${obj.name ? `${obj.name}@${obj.version}` : `index gen ${obj.generation}`})`); process.exit(0); }

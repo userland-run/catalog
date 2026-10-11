@@ -19,7 +19,8 @@
     "gate": "node tools/gate.mjs",
     "package": "node tools/package.mjs",
     "publish-catalog": "node tools/publish.mjs",
-    "test": "node tools/test/run.mjs"
+    "test": "node tools/test/run.mjs",
+    "check-pubkey": "node tools/check-pubkey.mjs"
   },
   "dependencies": {},
   "devDependencies": {}

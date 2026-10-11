@@ -17,9 +17,17 @@ npx wrangler login
 npx wrangler deploy        # → https://nano-cors-proxy.<account>.workers.dev
 ```
 
-Before deploying publicly, **tighten the `ALLOW` allow-list** in `worker.js` to the
-exact target hostnames you intend to proxy. An empty `ALLOW` array allows any
-origin (DEV ONLY) — an open proxy is an abuse magnet.
+The proxy **fails closed** until configured. Set these Worker vars in
+`wrangler.toml` `[vars]` before deploying (a `wrangler deploy` overwrites
+dashboard-set vars with the file's values):
+
+| var | meaning |
+|---|---|
+| `ALLOWED_ORIGINS` | Comma-separated browser Origins allowed to call the proxy, exact match (e.g. `https://userland.run,https://www.userland.run`). **Empty → every request gets 403.** The request Origin is never reflected unless it is on this list. |
+| `FORWARD_AUTHORIZATION` | `"true"` forwards the caller's `Authorization` header upstream — needed for private-repo clones and `git push` over HTTPS. Default `"false"`. Only enable on a proxy you operate: the operator can see those credentials. It is never forwarded to a different host after a redirect. |
+
+Target hosts are fixed in the `ALLOW` list in `worker.js`; keep it to the exact
+hostnames you intend to proxy. An empty `ALLOW` refuses every target.
 
 ## Wire it into the bridge
 
@@ -40,10 +48,21 @@ CORS-open targets never touch the proxy — it's a pure fallback.
 GET https://<worker>/?apiurl=<url-encoded target>
 ```
 
-- `OPTIONS` preflight is answered with the requested method/headers echoed back.
-- The proxy sets the upstream `Origin` to the target's own origin (defeating its
-  cross-site check) and re-emits the response with `Access-Control-Allow-Origin`
-  set to the requesting origin.
+- **Targets:** `https://` only, host on `ALLOW` (subdomains included), no
+  `user:pass@` in the URL.
+- **Methods:** `GET`/`HEAD` to any allowed target; `POST` only to git smart-HTTP
+  endpoints (`…/git-upload-pack` for clone/fetch, `…/git-receive-pack` for push).
+  Everything else → 405.
+- **Request headers:** only a fixed allow-list is forwarded — `Accept`,
+  `Accept-Language`, `Content-Type`, `Content-Encoding`, `Git-Protocol`,
+  `User-Agent`, `Range`, `If-None-Match`, `If-Modified-Since` (+ `Authorization`
+  when `FORWARD_AUTHORIZATION=true`). `Cookie`, `Origin`, `X-Forwarded-*` and
+  everything else are dropped.
+- **Redirects** are followed manually (at most 5 hops); every hop must again be
+  `https` + `ALLOW`ed, otherwise the request fails with 403.
+- `OPTIONS` preflight answers with the fixed method/header lists above (never
+  echoed from the request). Responses carry `Access-Control-Allow-Origin` set to
+  the (allow-listed) requesting origin; upstream `Set-Cookie` is stripped.
 
 ## Limits (browser sandbox, not nano)
 

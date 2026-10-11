@@ -9,6 +9,7 @@
 # is a follow-up); for now the recipe vendors that Dockerfile's output.
 set -euo pipefail
 cd "$(dirname "$0")"
+. ../../tools/lib/recipe-pin.sh   # clone_pinned / fetch_sha256 / ensure_cargo_zigbuild (supply-chain pins)
 mkdir -p out
 
 src=""
@@ -22,7 +23,9 @@ if [ -n "$src" ]; then
   cp "$src" out/node
 else
   : "${NANO_RELEASE:?set NANO_IMAGES or NANO_RELEASE to source the node ELF}"
-  curl -fsSL "$NANO_RELEASE/node" -o out/node
+  # Pinned to the nano v0.1.0 release asset; when NANO_RELEASE points at another
+  # release, pass its sha256 as NODE_ELF_SHA256 (a mismatch fails the build).
+  fetch_sha256 "$NANO_RELEASE/node" out/node "${NODE_ELF_SHA256:-1a77fe13fe35bd67f1d61291667553e9dea2f6bb6985d14ab64656d4d309648c}"
 fi
 
 chmod +x out/node

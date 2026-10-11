@@ -8,8 +8,9 @@
 # .build/ (gitignored) that points cargo at our source, then cross-compile.
 set -euo pipefail
 cd "$(dirname "$0")"
+. ../../tools/lib/recipe-pin.sh   # clone_pinned / fetch_sha256 / ensure_cargo_zigbuild (supply-chain pins)
 
-command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/null 2>&1 || cargo install cargo-zigbuild
+ensure_cargo_zigbuild
 
 # Synthesize a minimal crate around our single source file.
 rm -rf .build && mkdir -p .build/src

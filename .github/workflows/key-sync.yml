@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-UEL
+# Copyright (C) 2026 And The Next GmbH - https://userland.run
+#
+# Key-sync guard: keys/catalog.pub must equal the key the SDK pins in
+# sdk/src/catalog/pubkey.ts. Checks out the public userland-run/sdk repo (no
+# registry/CDN fetch, so it is not flaky on propagation lag). publish.yml runs the
+# same check before every publish.
+name: key-sync
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ["keys/**", "tools/check-pubkey.mjs", ".github/workflows/key-sync.yml"]
+  push:
+    branches: [main]
+    paths: ["keys/**", "tools/check-pubkey.mjs", ".github/workflows/key-sync.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/checkout@v4
+        with: { repository: userland-run/sdk, ref: main, path: sdk-checkout, persist-credentials: false, sparse-checkout: src/catalog }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: node tools/check-pubkey.mjs sdk-checkout/src/catalog/pubkey.ts --require

@@ -9,10 +9,15 @@ import { createHash, createPrivateKey, createPublicKey, sign as edSign, verify a
 
 // Deterministic JSON: object keys sorted recursively, no insignificant whitespace.
 // Arrays keep order. This is what we hash and sign.
+// Mirrors JSON.stringify for values JSON cannot represent: object members whose
+// value is undefined / a function / a symbol are omitted, and such values inside
+// arrays become null. (The SDK's canonicalize must do exactly the same, otherwise
+// a manifest with an undefined field would hash differently on each side.)
+const isSkippable = (v) => v === undefined || typeof v === "function" || typeof v === "symbol";
 export function canonicalize(value) {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return "[" + value.map(canonicalize).join(",") + "]";
-  const keys = Object.keys(value).sort();
+  if (Array.isArray(value)) return "[" + value.map((v) => (isSkippable(v) ? "null" : canonicalize(v))).join(",") + "]";
+  const keys = Object.keys(value).filter((k) => !isSkippable(value[k])).sort();
   return "{" + keys.map((k) => JSON.stringify(k) + ":" + canonicalize(value[k])).join(",") + "}";
 }
 
@@ -30,6 +35,7 @@ export function loadPrivateKey(secret) {
 // Load an Ed25519 public key from a raw 32-byte base64 key (keys/catalog.pub).
 export function loadPublicKeyRaw(rawB64) {
   const raw = Buffer.from(rawB64.trim(), "base64");
+  if (raw.length !== 32) throw new Error(`Ed25519 public key must be 32 raw bytes (got ${raw.length})`);
   // SPKI DER prefix for Ed25519, then the 32 raw bytes.
   const spki = Buffer.concat([
     Buffer.from("302a300506032b6570032100", "hex"),

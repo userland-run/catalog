@@ -57,6 +57,8 @@ jobs:
           if [ ! -x "$ZDIR/zig" ]; then
             curl -fL --retry 6 --retry-all-errors --retry-delay 5 \
               "https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz" -o /tmp/zig.tar.xz
+            # sha256 from https://ziglang.org/download/index.json (0.13.0 / x86_64-linux)
+            echo "d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea  /tmp/zig.tar.xz" | sha256sum -c -
             mkdir -p "$ZDIR" && tar -xJf /tmp/zig.tar.xz -C "$ZDIR" --strip-components=1
           fi
           echo "$ZDIR" >> "$GITHUB_PATH"
@@ -83,7 +85,7 @@ jobs:
             curl -fsSL "$NANO_RELEASE/node" -o node-runtime
             bin=node-runtime; tree="--tree $r/out"
           else
-            bin=$(find "$r/out" -type f -perm -u+x | head -1); tree=""
+            bin=$(find "$r/out" -maxdepth 1 -type f -perm -u+x | LC_ALL=C sort | head -1); tree=""
           fi
           echo "binary: $bin $tree"
           NANOVM_WASM=nano.min.wasm \
@@ -136,7 +138,7 @@ jobs:
           cat userland-results.json
 
       # Validate + publish to the status hub (default-branch only).
-      - uses: userland-run/status/.github/actions/publish-results@main
+      - uses: userland-run/status/.github/actions/publish-results@b3dd2561f99ff41c49bc198e52fac155e22af151 # main @ 2026-10-11; bump deliberately
         if: github.ref == 'refs/heads/main'
         with:
           source: catalog

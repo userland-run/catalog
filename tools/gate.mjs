@@ -54,8 +54,14 @@ if (verdict.loaded !== true) die("did not load (vm_load_elf failed — bad ELF o
 if (Number(verdict.exitCode) !== Number(expect.exitCode))
   die(`exit code ${verdict.exitCode}, expected ${expect.exitCode}`);
 
-// 3. Deterministic + correct golden output.
-if (expect.stdoutSha256 && verdict.stdoutSha256 !== expect.stdoutSha256)
+// 3. Deterministic + correct golden output. A missing/empty/"TBD" golden is a
+// rejection, never a skip: an uncaptured golden must not pass the gate.
+const isSha256 = (v) => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
+if (!isSha256(expect.stdoutSha256))
+  die(`no golden stdoutSha256 in expect (got ${JSON.stringify(expect.stdoutSha256)}) — capture it with tools/capture-golden.mjs`);
+if (!isSha256(verdict.stdoutSha256))
+  die(`verdict has no valid stdoutSha256 (got ${JSON.stringify(verdict.stdoutSha256)})`);
+if (verdict.stdoutSha256 !== expect.stdoutSha256)
   die(`stdout sha256 mismatch (nondeterminism or wrong output)\n  got      ${verdict.stdoutSha256}\n  expected ${expect.stdoutSha256}`);
 
 // 4. No fault.

@@ -10,6 +10,7 @@
 #   3. $NANO_RELEASE/busybox           (CI: a nano release asset)
 set -euo pipefail
 cd "$(dirname "$0")"
+. ../../tools/lib/recipe-pin.sh   # clone_pinned / fetch_sha256 / ensure_cargo_zigbuild (supply-chain pins)
 mkdir -p out
 src=""
 if [ -n "${NANO_IMAGES:-}" ] && [ -f "$NANO_IMAGES/busybox" ]; then
@@ -21,7 +22,9 @@ if [ -n "$src" ]; then
   cp "$src" out/busybox
 else
   : "${NANO_RELEASE:?set NANO_IMAGES or NANO_RELEASE to source the busybox ELF}"
-  curl -fsSL "$NANO_RELEASE/busybox" -o out/busybox
+  # Pinned to the nano v0.1.0 release asset; when NANO_RELEASE points at another
+  # release, pass its sha256 as BUSYBOX_SHA256 (a mismatch fails the build).
+  fetch_sha256 "$NANO_RELEASE/busybox" out/busybox "${BUSYBOX_SHA256:-65b782d6b2578d107a76de1d13e1256c255ffe7c0f30d1579027650ce54f9cab}"
 fi
 chmod +x out/busybox
 file out/busybox
