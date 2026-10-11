@@ -23,6 +23,6 @@
     "check-pubkey": "node tools/check-pubkey.mjs"
   },
   "devDependencies": {
-    "@userland-run/nano-sdk": "^0.2.5"
+    "@userland-run/nano-sdk": "^0.3.0"
   }
 }
