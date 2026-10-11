@@ -29,8 +29,11 @@ jobs:
       - uses: actions/checkout@v4
       - id: list
         run: |
-          # Emit a JSON array of ALL recipe names for the matrix.
-          recipes=$(ls -d recipes/*/ | sed 's#recipes/##; s#/##' | sort -u | jq -R . | jq -cs .)
+          # Emit a JSON array of ALL recipe names for the matrix, minus quarantined
+          # ones ([status] publish = false + reason — known-broken, not built; a
+          # ::warning:: names each with its reason). Invalid config → exit 2.
+          names=$(node tools/quarantine.mjs $(ls -d recipes/*/ | sed 's#recipes/##; s#/##' | sort -u))
+          recipes=$(printf '%s\n' "$names" | sed '/^$/d' | jq -R . | jq -cs .)
           echo "recipes=${recipes:-[]}" >> "$GITHUB_OUTPUT"
           echo "recipes: ${recipes:-[]}"
 
@@ -47,7 +50,7 @@ jobs:
 
       # Toolchains: Rust RV64GC musl target + zig (the C cross-compiler) + node.
       - uses: dtolnay/rust-toolchain@stable
-        with: { targets: riscv64gc-unknown-linux-musl }
+        with: { targets: "riscv64gc-unknown-linux-musl,wasm32-wasip1" }
       # Cache zig + fetch with curl --retry (the action's download flakes on a
       # transient ETIMEDOUT). Reliable for the C/Rust-with-C-deps recipes that need it.
       - name: Cache zig
@@ -65,6 +68,10 @@ jobs:
           fi
           echo "$ZDIR" >> "$GITHUB_PATH"
           "$ZDIR/zig" version
+      # wasi-sdk ($WASI_SDK_PATH) / pinned Go for GOOS=wasip1 — only when this
+      # recipe's build.sh needs them (see .github/actions/wasm-toolchains).
+      - uses: ./.github/actions/wasm-toolchains
+        with: { recipe: "${{ matrix.recipe }}" }
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
 

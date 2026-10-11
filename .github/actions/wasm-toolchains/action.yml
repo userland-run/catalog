@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-UEL
+# Copyright (C) 2026 And The Next GmbH - https://userland.run
+#
+# Extra toolchains for wasm-tier recipes, installed ONLY for a recipe whose
+# build.sh needs them (a 190 MB SDK on every matrix job would be waste):
+#   - wasi-sdk (pinned + sha256-verified), exported as $WASI_SDK_PATH — when
+#     build.sh references WASI_SDK_PATH (C/C++ → wasm32-wasip1, e.g. sqlite3).
+#   - Go (pinned exact version) — when build.sh does a GOOS=wasip1 Go build
+#     (e.g. pdfcpu). Plain riscv64 Go recipes keep the runner's preinstalled Go.
+# The Rust wasm32-wasip1 std is added by the calling workflow's
+# dtolnay/rust-toolchain `targets:` (cheap, so unconditional).
+#
+# Re-pin: bump the version + sha256 together (sha256 of the release tarball, e.g.
+# `gh api repos/WebAssembly/wasi-sdk/releases/tags/<tag> --jq '.assets[]|.name+" "+.digest'`).
+name: wasm-toolchains
+description: Install pinned wasi-sdk and/or Go when a recipe's build.sh needs them
+inputs:
+  recipe:
+    description: Recipe name (recipes/<recipe>/build.sh is inspected)
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: needs
+      shell: bash
+      run: |
+        b="recipes/${{ inputs.recipe }}/build.sh"
+        wasi=false; go=false
+        if [ -f "$b" ]; then
+          grep -q 'WASI_SDK_PATH' "$b" && wasi=true
+          grep -q 'wasip1' "$b" && grep -qE '(^|[^A-Za-z0-9_])go (build|install|run)([^A-Za-z0-9_]|$)' "$b" && go=true
+        fi
+        echo "wasi_sdk=$wasi" >> "$GITHUB_OUTPUT"
+        echo "go=$go" >> "$GITHUB_OUTPUT"
+        echo "recipe ${{ inputs.recipe }}: wasi-sdk=$wasi go(wasip1)=$go"
+
+    - if: steps.needs.outputs.go == 'true'
+      uses: actions/setup-go@v5
+      with:
+        go-version: "1.27.1"
+        cache: false
+
+    - if: steps.needs.outputs.wasi_sdk == 'true'
+      uses: actions/cache@v4
+      with: { path: ~/wasi-sdk-34.0, key: wasi-sdk-34.0-x86_64-linux }
+    - if: steps.needs.outputs.wasi_sdk == 'true'
+      shell: bash
+      run: |
+        WDIR="$HOME/wasi-sdk-34.0"
+        if [ ! -x "$WDIR/bin/clang" ]; then
+          curl -fL --retry 6 --retry-all-errors --retry-delay 5 \
+            "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz" \
+            -o /tmp/wasi-sdk.tar.gz
+          echo "b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4  /tmp/wasi-sdk.tar.gz" | sha256sum -c -
+          mkdir -p "$WDIR" && tar -xzf /tmp/wasi-sdk.tar.gz -C "$WDIR" --strip-components=1
+          rm -f /tmp/wasi-sdk.tar.gz
+        fi
+        echo "WASI_SDK_PATH=$WDIR" >> "$GITHUB_ENV"
+        "$WDIR/bin/clang" --version | head -1

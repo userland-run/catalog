@@ -58,6 +58,7 @@ tools/
   publish.mjs          npm (→ jsDelivr) submission + index/generation bump
   mirror-r2.mjs        optional Cloudflare R2 mirror
   check-pubkey.mjs     keys/catalog.pub == SDK's pinned key (sdk/src/catalog/pubkey.ts)
+  quarantine.mjs       matrix filter: drops quarantined recipes (lib/quarantine.mjs)
   lib/recipe-pin.sh    build.sh helpers: commit-pinned clones, sha256-checked
                        downloads, pinned cargo-zigbuild
   nano-syscalls.json   allowed syscall set, pinned per nano release
@@ -82,6 +83,38 @@ keys/
    then bumps the catalog generation.
 
 No binary reaches the catalog without passing on the runtime users actually run.
+
+### Build toolchains (CI)
+
+Every build job has stable Rust with the `riscv64gc-unknown-linux-musl` and
+`wasm32-wasip1` targets, zig 0.13.0 (C cross-compiler, sha256-pinned) and node 20.
+Two heavier toolchains are installed only for recipes whose `build.sh` needs them
+(`.github/actions/wasm-toolchains`):
+
+- **wasi-sdk 34** (sha256-pinned) → `$WASI_SDK_PATH` — when `build.sh` references
+  `WASI_SDK_PATH` (C/C++ → `wasm32-wasip1`).
+- **Go 1.27.1** (`actions/setup-go`, exact version) — when `build.sh` runs
+  `go build|install|run` and mentions `wasip1` (`GOOS=wasip1 GOARCH=wasm`). Plain
+  riscv64 Go recipes use the runner's preinstalled Go.
+
+### Quarantine (known-broken recipes)
+
+A recipe that cannot currently build or conform in CI can be quarantined in its
+`recipe.toml` instead of blocking the whole generation:
+
+```toml
+[status]
+publish = false
+reason  = "what is broken + what unblocks it"
+```
+
+A quarantined recipe is skipped by all matrices (publish, conformance, capture —
+each logs a `::warning::` with the reason) and `package.mjs` refuses to sign it.
+Versions it published earlier stay in the index: `publish.mjs` carries the prior
+generation's apps + cas blobs forward (signature- and hash-verified). `reason` is
+mandatory and `publish` must be a boolean — an invalid quarantine fails the job.
+Everything else stays fail-closed: one failing non-quarantined recipe still
+blocks the publish. Currently quarantined: `opencode` (needs an off-VM Bun bundle).
 
 ## Local development
 

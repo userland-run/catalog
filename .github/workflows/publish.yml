@@ -75,6 +75,10 @@ jobs:
             fi
             ready="$ready$name"$'\n'
           done
+          # Quarantined recipes ([status] publish = false + reason, see
+          # tools/lib/quarantine.mjs) are never built or published; their prior
+          # version is carried forward by publish.mjs. Invalid config → exit 2.
+          ready=$(node tools/quarantine.mjs $ready)
           arr=$(printf "%s" "$ready" | sed '/^$/d' | jq -R . | jq -cs .)
           echo "recipes=${arr:-[]}" >> "$GITHUB_OUTPUT"
           echo "publishable recipes: ${arr:-[]}"
@@ -92,7 +96,7 @@ jobs:
 
       # Toolchains: Rust RV64GC musl target + zig (the C cross-compiler) + node.
       - uses: dtolnay/rust-toolchain@stable
-        with: { targets: riscv64gc-unknown-linux-musl }
+        with: { targets: "riscv64gc-unknown-linux-musl,wasm32-wasip1" }
       # zig is the C cross-compiler for C recipes and Rust crates with C deps
       # (jemalloc, etc.). The action's download is flaky (transient ETIMEDOUT), so
       # cache it and fetch with curl --retry — reliable for the recipes that need it.
@@ -111,6 +115,10 @@ jobs:
           fi
           echo "$ZDIR" >> "$GITHUB_PATH"
           "$ZDIR/zig" version
+      # wasi-sdk ($WASI_SDK_PATH) / pinned Go for GOOS=wasip1 — only when this
+      # recipe's build.sh needs them (see .github/actions/wasm-toolchains).
+      - uses: ./.github/actions/wasm-toolchains
+        with: { recipe: "${{ matrix.recipe }}" }
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
 

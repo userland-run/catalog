@@ -148,3 +148,10 @@ contact = "https://github.com/userland-run/catalog"
 
 [status]
 features = ["catalog.recipe.opencode"]
+# QUARANTINED (2026-10-11) — see tools/lib/quarantine.mjs. Not built, conformed,
+# packaged or signed by CI; the previously published opencode stays in the index
+# via publish.mjs carry-forward. Unquarantine = delete these two lines once CI can
+# produce the bundle (e.g. a pinned, sha256-verified prebuilt OPENCODE_DIST
+# tarball fetched by build.sh, or an in-CI Bun bundling step).
+publish = false
+reason = "build.sh needs the off-VM Bun bundle (OPENCODE_DIST: index-nano.js + *.wasm + node_modules), which is not in the repo or fetchable in CI — every CI build fails at the src check"

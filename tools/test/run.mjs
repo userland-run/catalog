@@ -8,6 +8,7 @@
 
 import { generateKeyPairSync } from "node:crypto";
 import { parseToml } from "../lib/toml.mjs";
+import { quarantineOf } from "../lib/quarantine.mjs";
 import { chunk } from "../lib/fastcdc.mjs";
 import { canonicalize, finalizeManifest, verifyManifest, sha256hex, loadPublicKeyRaw } from "../lib/manifest.mjs";
 
@@ -26,6 +27,21 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error(`
     let threw = false;
     try { parseToml(bad); } catch { threw = true; }
     ok(threw, `toml: rejects unsupported syntax ${JSON.stringify(bad)}`);
+  }
+}
+
+// --- Quarantine ([status] publish = false + reason) ---
+{
+  const q = (src) => quarantineOf(parseToml(`name = "x"\n\n[status]\n${src}`));
+  ok(quarantineOf(parseToml(`name = "x"\n`)) === null, "quarantine: no [status] → publishable");
+  ok(q(`features = ["a"]\n`) === null, "quarantine: no publish key → publishable");
+  ok(q(`publish = true\n`) === null, "quarantine: publish = true → publishable");
+  const r = q(`publish = false\nreason = "needs off-VM bundle"\n`);
+  ok(r && r.reason === "needs off-VM bundle", "quarantine: publish = false + reason → quarantined");
+  for (const bad of [`publish = false\n`, `publish = false\nreason = "  "\n`, `publish = "no"\nreason = "x"\n`, `publish = 0\nreason = "x"\n`]) {
+    let threw = false;
+    try { q(bad); } catch { threw = true; }
+    ok(threw, `quarantine: invalid config throws ${JSON.stringify(bad)}`);
   }
 }
 

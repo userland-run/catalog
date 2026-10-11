@@ -27,6 +27,7 @@ import { execFileSync } from "node:child_process";
 import { resolve, dirname, basename, relative, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseToml } from "./lib/toml.mjs";
+import { quarantineOf } from "./lib/quarantine.mjs";
 import { chunk } from "./lib/fastcdc.mjs";
 import { finalizeManifest, sha256hex, loadPrivateKey } from "./lib/manifest.mjs";
 
@@ -142,6 +143,11 @@ for (const dir of buildDirs) {
   const recipeTomlPath = resolve(recipesDir, recipeName, "recipe.toml");
   if (!existsSync(recipeTomlPath)) { console.error(`skip ${recipeName}: no recipe.toml`); continue; }
   const recipe = parseToml(readFileSync(recipeTomlPath, "utf8"));
+  // Defense in depth: the workflows never build a quarantined recipe, but never
+  // sign one even if an artifact shows up (its prior version is carried forward).
+  // An invalid quarantine config throws → package fails closed.
+  const quarantine = quarantineOf(recipe, recipeName);
+  if (quarantine) { console.error(`skip ${recipeName}: quarantined — ${quarantine.reason}`); continue; }
   const { binary, outRoot, verdictPath } = findBuild(dir);
   if (!verdictPath) { console.error(`skip ${recipeName}: no verdict.json`); continue; }
   if (!recipe.multifile && !binary) { console.error(`skip ${recipeName}: no binary in out/`); continue; }
