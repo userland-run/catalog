@@ -1,7 +1,7 @@
 {
   "cmd": [
     "difft",
-    "--version"
+    "--list-languages"
   ],
   "env": {
     "LANG": "C"
@@ -9,7 +9,7 @@
   "load": [],
   "expect": {
     "exitCode": 0,
-    "stdoutSha256": "af285521dac328eaac992e3118f5a81ccfcf7c472e4e1e90770ec56bffc5b406",
+    "stdoutSha256": "0365139658fd32a630f7601b5f2e88f6f6a1527a7e911429257c97ce1f027a1e",
     "maxInstructions": 2000000000,
     "maxWallMs": 30000
   }

@@ -37,7 +37,7 @@ CC = ${ZCC}
 AR = zig ar
 RANLIB = zig ranlib
 CFLAGS = -O2 -static -I${PREFIX}/include
-LDFLAGS = -static -L${PREFIX}/lib
+LDFLAGS = -static -s -L${PREFIX}/lib
 ZLIB_PATH = ${PREFIX}
 uname_S = Linux
 # Drop every optional dependency — opencode only needs local repo introspection.
@@ -60,7 +60,11 @@ HAVE_GETDELIM = YesPlease
 MAK
 
 # Build just the monolithic git binary (skips docs, git-gui, subtree, etc.).
-make -j"$(nproc)" strip git
+# NOT `make strip`: that target runs the HOST `strip` (x86_64 binutils), which
+# can't parse a RISC-V ELF ("Unable to recognise the format of the input file",
+# Makefile:2448 strip Error 1). The binary is stripped at link time instead
+# (`-s` in LDFLAGS above — zig's lld handles the RISC-V ELF).
+make -j"$(nproc)" git
 
 mkdir -p ../out
 cp git ../out/git
