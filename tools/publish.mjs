@@ -32,7 +32,8 @@
 //
 // Usage: node tools/publish.mjs <dist> [--dry-run]
 //   env CATALOG_SIGNING_KEY / CATALOG_ED25519_PRIVATE_KEY  (to sign the index)
-//   env NODE_AUTH_TOKEN  (npm auth; absent → dry-run)
+//   env NODE_AUTH_TOKEN  (npm auth) or CATALOG_PUBLISH=oidc (trusted publishing);
+//       neither → dry-run
 //   env NANO_VERSION
 //   env CATALOG_PREV_PUBLIC_KEY  (optional, raw base64: verify the PREVIOUS
 //        generation with this key instead of keys/catalog.pub — key rotation only)
@@ -56,7 +57,9 @@ const casDir = resolve(distDir, "cas");
 const npmDir = resolve(distDir, "npm");
 
 const token = process.env.NODE_AUTH_TOKEN;
-const dryRun = process.argv.includes("--dry-run") || !token;
+// CATALOG_PUBLISH=oidc: publish via npm trusted publishing (GitHub OIDC, no token).
+const oidc = process.env.CATALOG_PUBLISH === "oidc";
+const dryRun = process.argv.includes("--dry-run") || (!token && !oidc);
 
 const secret = process.env.CATALOG_SIGNING_KEY || process.env.CATALOG_ED25519_PRIVATE_KEY;
 if (!secret) { console.error("error: CATALOG_SIGNING_KEY (or CATALOG_ED25519_PRIVATE_KEY) not set"); process.exit(1); }
@@ -304,6 +307,7 @@ for (const sha of existsSync(casDir) ? readdirSync(casDir) : []) {
 writeFileSync(resolve(casPkg, "package.json"), JSON.stringify({
   name: "@userland-run/nano-cas", version,
   description: "Content-addressed nano app chunks + manifests (served via jsDelivr).",
+  repository: { type: "git", url: "git+https://github.com/userland-run/catalog.git" },
   license: "AGPL-3.0-only OR LicenseRef-UEL", files: ["cas"], publishConfig: { access: "public" },
 }, null, 2) + "\n");
 
@@ -312,6 +316,7 @@ writeFileSync(resolve(indexPkg, "index.json"), JSON.stringify(index, null, 2) + 
 writeFileSync(resolve(indexPkg, "package.json"), JSON.stringify({
   name: "@userland-run/nano-catalog", version,
   description: "Signed nano app catalog index (served via jsDelivr).",
+  repository: { type: "git", url: "git+https://github.com/userland-run/catalog.git" },
   license: "AGPL-3.0-only OR LicenseRef-UEL", files: ["index.json"], publishConfig: { access: "public" },
 }, null, 2) + "\n");
 
@@ -332,5 +337,5 @@ for (const pkg of [casPkg, indexPkg]) {
 }
 
 console.error(dryRun
-  ? `\nDRY RUN complete (no NODE_AUTH_TOKEN or --dry-run). Inspect ${npmDir}. Generation would be ${gen}.`
+  ? `\nDRY RUN complete (no NODE_AUTH_TOKEN/CATALOG_PUBLISH=oidc, or --dry-run). Inspect ${npmDir}. Generation would be ${gen}.`
   : `\nPublished generation ${gen}: @userland-run/nano-cas@${version} + @userland-run/nano-catalog@${version}`);

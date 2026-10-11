@@ -205,14 +205,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write   # npm trusted publishing (OIDC) — no NPM_TOKEN
     # Job-level so step `if:` conditions can see it (a step's own `env:` is not
     # visible to that step's `if:`). Empty when the secret is unset → mirror skipped.
     env:
       R2_BUCKET: ${{ secrets.R2_BUCKET }}
     steps:
       - uses: actions/checkout@v4
+      # Trusted publishing needs npm >= 11.5.1 (ships with Node 24).
       - uses: actions/setup-node@v4
-        with: { node-version: 20, registry-url: "https://registry.npmjs.org" }
+        with: { node-version: 24, registry-url: "https://registry.npmjs.org" }
       - uses: actions/download-artifact@v4
         continue-on-error: true   # a manual reindex dispatch has no build-test artifacts
         with: { path: artifacts }   # each recipe lands in artifacts/build-<recipe>/
@@ -230,11 +232,14 @@ jobs:
         run: node tools/package.mjs artifacts --out dist --recipes recipes
 
       # [5] Publish: push chunks + index to npm (-> jsDelivr), bump generation.
-      # Without NPM_TOKEN this runs as a dry-run (assembles dist/npm, pushes nothing).
+      # Published via npm trusted publishing (OIDC); configure a trusted publisher
+      # for both @userland-run/nano-cas and @userland-run/nano-catalog on npmjs.com:
+      # GitHub Actions · userland-run / catalog · publish.yml · Allowed actions:
+      # direct npm publish.
       - name: Publish
         env:
           CATALOG_SIGNING_KEY: ${{ secrets.CATALOG_ED25519_PRIVATE_KEY }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CATALOG_PUBLISH: oidc
           # Only during a key rotation (see keys/README.md); empty otherwise.
           CATALOG_PREV_PUBLIC_KEY: ${{ vars.CATALOG_PREV_PUBLIC_KEY }}
         run: node tools/publish.mjs dist
