@@ -7,7 +7,9 @@
 //   @userland-run/nano-cas@<gen>     the cas/<sha256> blobs (chunks + signed manifests)
 //   @userland-run/nano-catalog@<gen>   index.json: name@version → manifest sha, signed
 //
-// Generation is monotonic: gen = (latest published index patch) + 1. Because each
+// Generation is monotonic: gen = max(latest cas patch, latest index patch) + 1 —
+// taking the max of BOTH packages means a half-finished run (cas@N published,
+// index@N failed) cannot wedge the next run on the already-taken N. Because each
 // generation is an immutable npm version, jsDelivr caches it forever; the client
 // resolves the newest generation via the jsDelivr versions API (never a mutable
 // file). See spec §7.2 and the SDK's cdn.ts.
@@ -17,6 +19,13 @@
 // at @userland-run/nano-cas@<gen>. This keeps the client trivial (one generation to fetch
 // from) at the cost of package growth; switch to the R2 mirror past npm's 100MB.
 //
+// Fail-closed carry-forward: when a previous generation exists, its index and
+// cas package are fetched with `npm pack` (no CDN propagation lag), the index and
+// every bundle manifest are verified against keys/catalog.pub (+ generation
+// check), and before anything is pushed every sha the new index references (app
+// manifests, their chunks, bundles) must be present and hash-correct in dist/cas.
+// Any failure exits non-zero — we never publish a generation with holes.
+//
 // Without NODE_AUTH_TOKEN (or with --dry-run) nothing is pushed: the npm package
 // dirs are assembled under <dist>/npm/ and `npm publish --dry-run` is run so the
 // output is fully inspectable locally.
@@ -25,13 +34,15 @@
 //   env CATALOG_SIGNING_KEY / CATALOG_ED25519_PRIVATE_KEY  (to sign the index)
 //   env NODE_AUTH_TOKEN  (npm auth; absent → dry-run)
 //   env NANO_VERSION
+//   env CATALOG_PREV_PUBLIC_KEY  (optional, raw base64: verify the PREVIOUS
+//        generation with this key instead of keys/catalog.pub — key rotation only)
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, cpSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createPublicKey } from "node:crypto";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { finalizeManifest, loadPrivateKey } from "./lib/manifest.mjs";
+import { finalizeManifest, loadPrivateKey, loadPublicKeyRaw, verifyManifest } from "./lib/manifest.mjs";
 import { parseToml } from "./lib/toml.mjs";
 
 const sha256hex = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -51,35 +62,75 @@ const secret = process.env.CATALOG_SIGNING_KEY || process.env.CATALOG_ED25519_PR
 if (!secret) { console.error("error: CATALOG_SIGNING_KEY (or CATALOG_ED25519_PRIVATE_KEY) not set"); process.exit(1); }
 const privateKey = loadPrivateKey(secret);
 
+const die = (msg) => { console.error(`error: ${msg}`); process.exit(1); };
+
+// The signing key must match the pinned public key, or every client rejects us.
+const pubB64 = readFileSync(resolve(root, "keys/catalog.pub"), "utf8").trim();
+const publicKey = loadPublicKeyRaw(pubB64);
+{
+  const derived = Buffer.from(createPublicKey(privateKey).export({ format: "jwk" }).x, "base64url").toString("base64");
+  if (derived !== pubB64) die("CATALOG_SIGNING_KEY does not match keys/catalog.pub — refusing to sign");
+}
+const prevPublicKey = process.env.CATALOG_PREV_PUBLIC_KEY ? loadPublicKeyRaw(process.env.CATALOG_PREV_PUBLIC_KEY) : publicKey;
+
 const nanoVersion = process.env.NANO_VERSION
   || (existsSync(resolve(toolsDir, "nano-syscalls.json")) ? JSON.parse(readFileSync(resolve(toolsDir, "nano-syscalls.json"), "utf8")).nano_version : "0.0.0");
 
 if (!existsSync(resolve(distDir, "manifests.json"))) { console.error(`error: ${distDir}/manifests.json not found — run package.mjs first`); process.exit(1); }
 const records = JSON.parse(readFileSync(resolve(distDir, "manifests.json"), "utf8"));
 
-// --- Resolve generation from the published index, best-effort ---
-function npmViewVersion(pkg) {
-  // A 404 (package not yet published) is normal on the first generation; swallow
-  // npm's stderr so it doesn't read like a failure in CI logs.
-  try { return execFileSync("npm", ["view", pkg, "version"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
-  catch { return null; }
-}
-const prevVer = npmViewVersion("@userland-run/nano-catalog@latest");
-const prevGen = prevVer ? Number(prevVer.split(".").pop()) : 0;
-const gen = (Number.isFinite(prevGen) ? prevGen : 0) + 1;
-const version = `0.0.${gen}`;
-console.error(`generation: ${gen} (prev index version: ${prevVer || "none"})  → npm version ${version}`);
-
-// --- Carry forward the prior index's app map + per-app tier metadata ---
-async function fetchPrevIndex() {
-  if (!prevVer) return { apps: {}, appMeta: {} };
-  const url = `https://cdn.jsdelivr.net/npm/@userland-run/nano-catalog@${prevVer}/index.json`;
+// --- Resolve generation from BOTH published packages (fail-closed) ---
+// Returns the highest published 0.0.<gen> patch, 0 when the package has never
+// been published (npm E404), and exits on any other npm/network failure — a
+// transient error must not masquerade as "first generation".
+function npmMaxGen(pkg) {
+  let out;
   try {
-    const r = await fetch(url);
-    if (!r.ok) return { apps: {}, appMeta: {} };
-    const j = await r.json();
-    return { apps: j.apps || {}, appMeta: j.appMeta || {} };
-  } catch { return { apps: {}, appMeta: {} }; }
+    out = execFileSync("npm", ["view", pkg, "versions", "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (e) {
+    const err = `${e.stderr || ""}${e.stdout || ""}`;
+    if (/E404|404 Not Found/.test(err)) return 0;
+    die(`npm view ${pkg} failed: ${err.trim().split("\n").slice(-3).join(" | ") || e.message}`);
+  }
+  let vs;
+  try { vs = JSON.parse(out); } catch { die(`npm view ${pkg}: unparseable output`); }
+  const gens = (Array.isArray(vs) ? vs : [vs]).map((v) => Number(String(v).split(".").pop())).filter(Number.isSafeInteger);
+  return gens.length ? Math.max(...gens) : 0;
+}
+const prevGen = npmMaxGen("@userland-run/nano-catalog");   // last COMPLETE generation (index published last)
+const casGen = npmMaxGen("@userland-run/nano-cas");
+const prevVer = prevGen > 0 ? `0.0.${prevGen}` : null;
+const gen = Math.max(prevGen, casGen) + 1;
+const version = `0.0.${gen}`;
+if (casGen > prevGen) console.error(`note: nano-cas@0.0.${casGen} has no matching index (half-finished earlier run); skipping to ${gen}`);
+console.error(`generation: ${gen} (prev index version: ${prevVer || "none"}, latest cas: ${casGen || "none"})  → npm version ${version}`);
+
+// npm pack <spec> into a temp dir and extract it; returns the extracted package/ dir.
+const prevTmp = resolve(distDir, ".prev");
+function npmPackExtract(spec, sub) {
+  const dir = resolve(prevTmp, sub);
+  mkdirSync(dir, { recursive: true });
+  try {
+    const tarName = execFileSync("npm", ["pack", spec, "--silent"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim().split("\n").pop();
+    execFileSync("tar", ["xzf", tarName], { cwd: dir });
+  } catch (e) {
+    die(`could not fetch ${spec}: ${(e.stderr || e.message || "").toString().trim()}`);
+  }
+  return resolve(dir, "package");
+}
+
+// --- Carry forward + VERIFY the prior index (signature + generation) ---
+function loadPrevIndex() {
+  if (!prevVer) return null;
+  const pkgDir = npmPackExtract(`@userland-run/nano-catalog@${prevVer}`, "index");
+  let idx;
+  try { idx = JSON.parse(readFileSync(resolve(pkgDir, "index.json"), "utf8")); }
+  catch (e) { die(`prev index ${prevVer}: unreadable index.json (${e.message})`); }
+  const v = verifyManifest(idx, prevPublicKey);
+  if (!v.ok) die(`prev index ${prevVer} failed verification: ${v.reason}`);
+  if (idx.generation !== prevGen) die(`prev index ${prevVer} claims generation ${idx.generation}, expected ${prevGen}`);
+  if (!idx.apps || typeof idx.apps !== "object" || Array.isArray(idx.apps)) die(`prev index ${prevVer}: missing apps map`);
+  return idx;
 }
 
 // Execution tier (runner) an artifact kind runs on — mirrors the SDK's kindToTier.
@@ -93,29 +144,20 @@ function tierOf(kind) {
 // --- Carry forward the prior cas blobs (cumulative cas package) ---
 function carryForwardCas() {
   if (!prevVer) return 0;
+  mkdirSync(casDir, { recursive: true });
+  const prevCas = resolve(npmPackExtract(`@userland-run/nano-cas@${prevVer}`, "cas"), "cas");
+  if (!existsSync(prevCas)) die(`@userland-run/nano-cas@${prevVer} has no cas/ dir`);
   let added = 0;
-  const tmp = resolve(distDir, ".prevcas");
-  try {
-    mkdirSync(tmp, { recursive: true });
-    // npm pack downloads the tarball; extract its package/cas/* into our casDir.
-    const tarName = execFileSync("npm", ["pack", `@userland-run/nano-cas@${prevVer}`, "--silent"], { cwd: tmp, encoding: "utf8" }).trim();
-    execFileSync("tar", ["xzf", tarName], { cwd: tmp });
-    const prevCas = resolve(tmp, "package", "cas");
-    if (existsSync(prevCas)) {
-      for (const sha of readdirSync(prevCas)) {
-        const dst = resolve(casDir, sha);
-        if (!existsSync(dst)) { cpSync(resolve(prevCas, sha), dst); added++; }
-      }
-    }
-  } catch (e) {
-    console.error(`  (could not carry forward prior cas: ${e.message}; publishing current chunks only)`);
-  } finally {
-    try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  for (const sha of readdirSync(prevCas)) {
+    const dst = resolve(casDir, sha);
+    if (!existsSync(dst)) { cpSync(resolve(prevCas, sha), dst); added++; }
   }
   return added;
 }
 
-const { apps, appMeta } = await fetchPrevIndex();
+const prevIndex = loadPrevIndex();
+const apps = { ...(prevIndex ? prevIndex.apps : {}) };
+const appMeta = { ...(prevIndex && prevIndex.appMeta ? prevIndex.appMeta : {}) };
 for (const rec of records) {
   const ref = `${rec.name}@${rec.version}`;
   apps[ref] = rec.manifestSha;
@@ -130,25 +172,37 @@ for (const ref of Object.keys(apps)) {
 const carried = carryForwardCas();
 console.error(`apps in index: ${Object.keys(apps).length} (carried forward ${carried} prior cas blob(s))`);
 
+// Read a cas blob from dist/cas and check its content address.
+function readCasBlob(sha, what) {
+  if (!/^[0-9a-f]{64}$/.test(sha)) die(`${what}: malformed sha ${JSON.stringify(sha)}`);
+  const p = resolve(casDir, sha);
+  if (!existsSync(p)) die(`${what}: cas blob ${sha} missing from ${casDir}`);
+  const bytes = readFileSync(p);
+  if (sha256hex(bytes) !== sha) die(`${what}: cas blob ${sha} content does not match its address`);
+  return bytes;
+}
+
 // --- Topic bundles (bottling): one signed bundle manifest per topic, listing its
 // member app refs. Cumulative: carry forward prior bundles' refs and union in the
-// current recipes' topics. The CAS already dedups shared chunks across members. ---
-async function fetchPrevBundles() {
+// current recipes' topics. The CAS already dedups shared chunks across members.
+// Prior bundle manifests are read from the carried-forward cas and verified
+// (signature + kind + generation) before their refs are re-signed. ---
+function loadPrevBundles() {
   const out = {}; // slug -> { topic, apps: Set<ref> }
-  if (!prevVer) return out;
-  try {
-    const idx = await (await fetch(`https://cdn.jsdelivr.net/npm/@userland-run/nano-catalog@${prevVer}/index.json`)).json();
-    for (const [slug, sha] of Object.entries(idx.bundles || {})) {
-      try {
-        const bm = await (await fetch(`https://cdn.jsdelivr.net/npm/@userland-run/nano-cas@${prevVer}/cas/${sha}`)).json();
-        out[slug] = { topic: bm.topic || slug, apps: new Set(bm.apps || []) };
-      } catch { /* skip a missing bundle */ }
-    }
-  } catch { /* no prior bundles */ }
+  if (!prevIndex) return out;
+  for (const [slug, sha] of Object.entries(prevIndex.bundles || {})) {
+    let bm;
+    try { bm = JSON.parse(readCasBlob(sha, `prev bundle ${slug}`).toString("utf8")); }
+    catch (e) { die(`prev bundle ${slug} (${sha}): unparseable (${e.message})`); }
+    const v = verifyManifest(bm, prevPublicKey);
+    if (!v.ok) die(`prev bundle ${slug} (${sha}) failed verification: ${v.reason}`);
+    if (bm.kind !== "bundle" || bm.generation !== prevGen) die(`prev bundle ${slug} (${sha}): kind=${bm.kind} generation=${bm.generation}, expected bundle@${prevGen}`);
+    out[slug] = { topic: bm.topic || slug, apps: new Set(Array.isArray(bm.apps) ? bm.apps : []) };
+  }
   return out;
 }
 
-const bundleAcc = await fetchPrevBundles();
+const bundleAcc = loadPrevBundles();
 for (const rec of records) {
   for (const topic of (rec.topics || [])) {
     const slug = slugify(topic);
@@ -214,6 +268,24 @@ const indexCore = {
   ...(Object.keys(collections).length ? { collections } : {}), // "slug" -> { title, description, members[] }
 };
 const { manifest: index } = finalizeManifest(indexCore, privateKey);
+
+// --- Completeness: every sha the new index references must be in dist/cas and
+// hash-correct — app manifests (signature-verified), their chunks, and bundles. ---
+{
+  let checkedChunks = 0;
+  for (const [ref, sha] of Object.entries(apps)) {
+    let m;
+    try { m = JSON.parse(readCasBlob(sha, `app ${ref}`).toString("utf8")); }
+    catch (e) { die(`app ${ref} (${sha}): unparseable manifest (${e.message})`); }
+    if (!verifyManifest(m, publicKey).ok && !verifyManifest(m, prevPublicKey).ok) die(`app ${ref} (${sha}): manifest signature invalid`);
+    for (const f of Array.isArray(m.files) ? m.files : []) {
+      for (const c of Array.isArray(f.chunks) ? f.chunks : []) { readCasBlob(c, `app ${ref} ${f.path}`); checkedChunks++; }
+    }
+  }
+  for (const [slug, sha] of Object.entries(bundles)) readCasBlob(sha, `bundle ${slug}`);
+  console.error(`completeness: ${Object.keys(apps).length} manifest(s), ${checkedChunks} chunk ref(s), ${Object.keys(bundles).length} bundle(s) present + verified`);
+}
+rmSync(prevTmp, { recursive: true, force: true });
 
 // --- Assemble npm package dirs ---
 rmSync(npmDir, { recursive: true, force: true });

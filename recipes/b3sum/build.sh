@@ -4,12 +4,14 @@
 # the musl/libgcc_s quirks that a raw "cargo build + zig linker" trips over.
 set -euo pipefail
 cd "$(dirname "$0")"
+. ../../tools/lib/recipe-pin.sh   # clone_pinned / fetch_sha256 / ensure_cargo_zigbuild (supply-chain pins)
 REPO="https://github.com/BLAKE3-team/BLAKE3"
 REV="1.8.5"
+SHA="93a431c78a52d7ccf0f366f106467f5070e6075e"  # commit 1.8.5 must resolve to; re-pin: git ls-remote $REPO "refs/tags/$REV^{}"
 
-command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/null 2>&1 || cargo install cargo-zigbuild
+ensure_cargo_zigbuild
 
-rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
+clone_pinned "$REPO" "$REV" "$SHA" .src
 cd .src
 rustup target add riscv64gc-unknown-linux-musl
 # b3sum is a standalone crate under b3sum/ — NOT a member of the root blake3
@@ -17,7 +19,7 @@ rustup target add riscv64gc-unknown-linux-musl
 # "package ID specification `b3sum` did not match any packages". Build inside its
 # own directory; it pulls in the parent blake3 via a `path = ".."` dependency.
 cd b3sum
-cargo zigbuild --release --target riscv64gc-unknown-linux-musl --bin b3sum
+cargo zigbuild --release --locked --target riscv64gc-unknown-linux-musl --bin b3sum
 cd ../..
 mkdir -p out
 cp .src/b3sum/target/riscv64gc-unknown-linux-musl/release/b3sum out/b3sum

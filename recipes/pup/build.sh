@@ -3,10 +3,12 @@
 # fully static binary with no libc dependency.
 set -euo pipefail
 cd "$(dirname "$0")"
+. ../../tools/lib/recipe-pin.sh   # clone_pinned / fetch_sha256 / ensure_cargo_zigbuild (supply-chain pins)
 REPO="https://github.com/ericchiang/pup"
 REV="v0.4.0"
+SHA="fb09a23cce6c8ed60ba9b85035e3e27adff96aa3"  # commit v0.4.0 must resolve to; re-pin: git ls-remote $REPO "refs/tags/$REV^{}"
 
-rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
+clone_pinned "$REPO" "$REV" "$SHA" .src
 cd .src
 mkdir -p ../out
 # pup v0.4.0 predates Go modules (GOPATH era) and ships a stale vendor/ tree, so

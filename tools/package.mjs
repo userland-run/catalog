@@ -112,12 +112,18 @@ function findBuild(artifactDir) {
     }
   };
   walk(artifactDir);
+  // Deterministic binary selection — the SAME rule as publish.yml's Validate ELF
+  // + Conformance steps (`find out -maxdepth 1 -type f -perm -u+x | LC_ALL=C sort
+  // | head -1`): the first owner-executable regular file directly in out/, by
+  // byte-order name. readdirSync order is filesystem-dependent, so sort first.
   let binary = null;
   if (outRoot) {
-    for (const name of readdirSync(outRoot)) {
-      const p = resolve(outRoot, name);
-      if (statSync(p).isFile()) { binary = p; break; }
-    }
+    const execs = readdirSync(outRoot)
+      .sort((a, b) => (Buffer.compare(Buffer.from(a), Buffer.from(b))))
+      .map((name) => resolve(outRoot, name))
+      .filter((p) => { const st = statSync(p); return st.isFile() && (st.mode & 0o100) !== 0; });
+    if (execs.length > 1) console.error(`  note: ${execs.length} executables in ${outRoot}; packaging ${basename(execs[0])}`);
+    binary = execs[0] || null;
   }
   return { binary, outRoot, verdictPath };
 }
@@ -142,6 +148,16 @@ for (const dir of buildDirs) {
   if (recipe.multifile && !outRoot) { console.error(`skip ${recipeName}: no out/ tree`); continue; }
 
   const verdict = JSON.parse(readFileSync(verdictPath, "utf8"));
+  // The conformance block is signed into the manifest — refuse to sign a verdict
+  // that lacks a real golden hash or instruction count (never sign `undefined`).
+  if (typeof verdict.stdoutSha256 !== "string" || !/^[0-9a-f]{64}$/.test(verdict.stdoutSha256)) {
+    console.error(`error: ${recipeName}: verdict.stdoutSha256 missing or not a sha256 (${JSON.stringify(verdict.stdoutSha256)})`);
+    process.exit(1);
+  }
+  if (!Number.isSafeInteger(verdict.instructions) || verdict.instructions < 0) {
+    console.error(`error: ${recipeName}: verdict.instructions missing or not a non-negative integer (${JSON.stringify(verdict.instructions)})`);
+    process.exit(1);
+  }
 
   // Single-binary recipe → one file at its install path. Multi-file recipe
   // (e.g. typescript) → walk out/ as a guest-FS-rooted tree (out/usr/bin/node →

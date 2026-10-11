@@ -12,6 +12,7 @@
 #      a new autodetect, add the corresponding NO_*/HAVE_* line there.
 set -euo pipefail
 cd "$(dirname "$0")"
+. ../../tools/lib/recipe-pin.sh   # clone_pinned / fetch_sha256 / ensure_cargo_zigbuild (supply-chain pins)
 
 ZTARGET="riscv64-linux-musl"
 ZCC="zig cc -target ${ZTARGET} -march=baseline_rv64"
@@ -21,14 +22,14 @@ rm -rf .zlib .src zprefix out
 PREFIX="$PWD/zprefix"
 
 # --- static zlib (riscv64-musl) ---
-git clone --depth 1 --branch v1.3.1 https://github.com/madler/zlib .zlib
+clone_pinned https://github.com/madler/zlib v1.3.1 51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf .zlib
 ( cd .zlib
   CC="$ZCC" CHOST=riscv64 ./configure --static --prefix="$PREFIX"
   make -j"$(nproc)"
   make install )
 
 # --- git ---
-git clone --depth 1 --branch v2.47.1 https://github.com/git/git .src
+clone_pinned https://github.com/git/git v2.47.1 92999a42db1c5f43f330e4f2bca4026b5b81576f .src
 cd .src
 
 cat > config.mak <<MAK

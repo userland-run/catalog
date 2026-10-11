@@ -11,13 +11,18 @@
 # (system/musl) allocator — correctness is unaffected, only allocator perf.
 set -euo pipefail
 cd "$(dirname "$0")"
+. ../../tools/lib/recipe-pin.sh   # clone_pinned / fetch_sha256 / ensure_cargo_zigbuild (supply-chain pins)
 REPO="https://github.com/BurntSushi/ripgrep"
 REV="14.1.0"
+SHA="e50df40a1967708b9781486b1c017e48040bceb0"  # commit 14.1.0 must resolve to; re-pin: git ls-remote $REPO "refs/tags/$REV^{}"
 
-command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/null 2>&1 || cargo install cargo-zigbuild
+ensure_cargo_zigbuild
 
-rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
+clone_pinned "$REPO" "$REV" "$SHA" .src
 cd .src
+# The Cargo.toml patch below drops a dependency, so `--locked` can't be used;
+# instead assert after the build that the lockfile only lost entries.
+lock_snapshot
 
 # --- Drop jemalloc (avoids the jemalloc-sys ./configure failure under zig) ---
 # 1) Remove the #[global_allocator] block in crates/core/main.rs:
@@ -42,6 +47,7 @@ if grep -nq jemallocator crates/core/main.rs Cargo.toml; then
 fi
 
 cargo zigbuild --release --target riscv64gc-unknown-linux-musl
+lock_assert_pruned_only
 cd ..
 mkdir -p out
 cp .src/target/riscv64gc-unknown-linux-musl/release/rg out/rg

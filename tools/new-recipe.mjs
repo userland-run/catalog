@@ -20,6 +20,7 @@
 import { mkdirSync, writeFileSync, existsSync, chmodSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -42,6 +43,25 @@ function splitSrc(src) {
   return { path: src };
 }
 
+// Resolve the commit a tag/branch points at (peeled), so the scaffolded build.sh
+// pins it via clone_pinned. Offline / unknown ref → "" and the build fails closed
+// ("expected a 40-hex commit sha") until SHA is filled in.
+function resolveSha(repo, rev) {
+  try {
+    const out = execFileSync("git", ["ls-remote", repo, `refs/tags/${rev}`, `refs/tags/${rev}^{}`, `refs/heads/${rev}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30000 });
+    const rows = out.trim().split("\n").filter(Boolean).map((l) => l.split("\t"));
+    const peeled = rows.find(([, ref]) => ref.endsWith("^{}"));
+    return (peeled || rows[0] || [""])[0];
+  } catch { return ""; }
+}
+
+const PIN = (repo, rev) => {
+  const sha = resolveSha(repo, rev);
+  if (!sha) console.error(`warning: could not resolve ${repo}@${rev} — set SHA in build.sh (git ls-remote ${repo} "refs/tags/${rev}^{}")`);
+  return `SHA="${sha}"  # commit ${rev} must resolve to; re-pin: git ls-remote $REPO "refs/tags/$REV^{}"`;
+};
+
 const RUST = (repo, rev, bin, pkg, features) => {
   const sel = [
     pkg ? `-p ${pkg}` : "",
@@ -54,18 +74,20 @@ const RUST = (repo, rev, bin, pkg, features) => {
 # the musl/libgcc_s quirks that a raw "cargo build + zig linker" trips over.
 set -euo pipefail
 cd "$(dirname "$0")"
+. ../../tools/lib/recipe-pin.sh   # clone_pinned / fetch_sha256 / ensure_cargo_zigbuild (supply-chain pins)
 REPO="${repo}"
 REV="${rev}"
+${PIN(repo, rev)}
 
-command -v cargo-zigbuild >/dev/null 2>&1 || pipx install cargo-zigbuild >/dev/null 2>&1 || cargo install cargo-zigbuild
+ensure_cargo_zigbuild
 
-rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
+clone_pinned "$REPO" "$REV" "$SHA" .src
 cd .src
 # Add the musl target to whatever toolchain the repo PINS (rust-toolchain.toml),
 # not just the default — otherwise a pinned toolchain has no riscv64 musl std and
 # the build dies with E0463 "can't find crate for \`core\`".
 rustup target add riscv64gc-unknown-linux-musl
-cargo zigbuild --release --target riscv64gc-unknown-linux-musl ${sel}
+cargo zigbuild --release --locked --target riscv64gc-unknown-linux-musl ${sel}
 cd ..
 mkdir -p out
 cp .src/target/riscv64gc-unknown-linux-musl/release/${bin} out/${bin}
@@ -78,10 +100,12 @@ const GO = (repo, rev, bin, pkg) => `#!/usr/bin/env bash
 # fully static binary with no libc dependency.
 set -euo pipefail
 cd "$(dirname "$0")"
+. ../../tools/lib/recipe-pin.sh   # clone_pinned (supply-chain pin)
 REPO="${repo}"
 REV="${rev}"
+${PIN(repo, rev)}
 
-rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src
+clone_pinned "$REPO" "$REV" "$SHA" .src
 cd .src
 mkdir -p ../out
 GOOS=linux GOARCH=riscv64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ../out/${bin} ${pkg}
@@ -102,7 +126,7 @@ mkdir -p out
 # Single-file C app:
 #   $CC -static -march=baseline_rv64 -Oz ${src.path || "src/" + bin + ".c"} -o out/${bin}
 # Autotools/make project (clone, configure with the cross CC, make, copy):
-#   rm -rf .src && git clone --depth 1 --branch "$REV" "$REPO" .src && cd .src
+#   . ../../tools/lib/recipe-pin.sh && clone_pinned "$REPO" "$REV" "$SHA" .src && cd .src
 #   ./configure --host=riscv64-linux-musl CC="$CC" AR="$AR" LDFLAGS="-static" && make -j"$(nproc)"
 #   cp <built-binary> ../out/${bin}
 

@@ -57,6 +57,9 @@ tools/
   package.mjs          strip, gzip, chunk, hash, sign, manifest
   publish.mjs          npm (→ jsDelivr) submission + index/generation bump
   mirror-r2.mjs        optional Cloudflare R2 mirror
+  check-pubkey.mjs     keys/catalog.pub == SDK's pinned key (sdk/src/catalog/pubkey.ts)
+  lib/recipe-pin.sh    build.sh helpers: commit-pinned clones, sha256-checked
+                       downloads, pinned cargo-zigbuild
   nano-syscalls.json   allowed syscall set, pinned per nano release
   vendor/              pinned nano host modules (memfs, host protocol)
 keys/
@@ -68,7 +71,11 @@ keys/
 ## Submitting an app
 
 1. Open a PR adding `recipes/<name>/` with `recipe.toml`, `build.sh`, and
-   `test/run.json` (plus any `test/fixtures/`).
+   `test/run.json` (plus any `test/fixtures/`). `build.sh` must pin its inputs
+   by content: `clone_pinned "$REPO" "$REV" "$SHA"` (tag + expected commit),
+   `fetch_sha256` for downloads, and `cargo zigbuild --locked` when upstream
+   ships a `Cargo.lock` (see `tools/lib/recipe-pin.sh`; `new-recipe.mjs`
+   scaffolds this).
 2. CI compiles, validates, and runs conformance on the literal nano runtime.
    The PR shows pass/fail with the precise reason.
 3. A maintainer merges. The publish job packages, signs, and pushes to the CDN,

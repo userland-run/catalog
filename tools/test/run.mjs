@@ -21,6 +21,12 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error(`
   ok(t.version === "14.1.0", "toml: version");
   ok(Array.isArray(t.entrypoint.argv) && t.entrypoint.argv[1] === "--version", "toml: argv array");
   ok(t.entrypoint.env.LANG === "C", "toml: inline table env");
+  // Unsupported syntax must throw, never misparse.
+  for (const bad of ["[[a]]\nx = 1", "[a.b]\nx = 1", "a = [\n  1,\n]", "a.b = 1", "x = 1.5", "junk line", "x = 'lit'"]) {
+    let threw = false;
+    try { parseToml(bad); } catch { threw = true; }
+    ok(threw, `toml: rejects unsupported syntax ${JSON.stringify(bad)}`);
+  }
 }
 
 // --- FastCDC determinism + dedup ---
@@ -54,6 +60,17 @@ const ok = (cond, msg) => { if (cond) { pass++; } else { fail++; console.error(`
 // --- canonicalize stability ---
 {
   ok(canonicalize({ b: 1, a: [3, 2], c: { y: 1, x: 2 } }) === '{"a":[3,2],"b":1,"c":{"x":2,"y":1}}', "canonicalize: sorted keys, array order preserved");
+  // undefined handling must match JSON.stringify exactly (the SDK mirrors this).
+  const withUndef = { b: undefined, a: 1, c: { d: undefined, e: [undefined, 2] }, f: () => 1 };
+  ok(canonicalize(withUndef) === '{"a":1,"c":{"e":[null,2]}}', "canonicalize: undefined keys skipped, undefined array items → null");
+  ok(canonicalize(withUndef) === canonicalize(JSON.parse(JSON.stringify(withUndef))), "canonicalize: stable across a JSON roundtrip");
+}
+
+// --- loadPublicKeyRaw rejects keys that are not 32 raw bytes ---
+{
+  let threw = false;
+  try { loadPublicKeyRaw(Buffer.alloc(31).toString("base64")); } catch { threw = true; }
+  ok(threw, "loadPublicKeyRaw: rejects a 31-byte key");
 }
 
 // --- manifest sign + verify roundtrip + tamper ---
