@@ -8,3 +8,4 @@ recipes/*/out/
 recipes/*/.build/
 .DS_Store
 .capture-verdict.json
+recipes/*/.src/
