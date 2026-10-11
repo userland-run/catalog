@@ -1,0 +1,24 @@
+{
+  "cmd": [
+    "sqlite3",
+    ":memory:",
+    ".import --csv data.csv t",
+    ".mode table",
+    "SELECT region, count(*) AS n, sum(qty) AS qty, round(sum(qty*price), 2) AS total FROM t GROUP BY region ORDER BY region",
+    ".mode csv",
+    "SELECT product, sum(qty) FROM t GROUP BY product ORDER BY 1"
+  ],
+  "env": {},
+  "cwd": "/in",
+  "load": [
+    {
+      "from": "fixtures/data.csv",
+      "to": "/in/data.csv"
+    }
+  ],
+  "expect": {
+    "exitCode": 0,
+    "maxWallMs": 15000,
+    "stdoutSha256": "a8afd0d9e72a2aee2d1628f96d5782a37e0a33d1a318e07901545e586bb08152"
+  }
+}

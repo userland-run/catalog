@@ -1,0 +1,37 @@
+{
+  "cmd": [
+    "exifstrip",
+    "strip",
+    "-o",
+    "out",
+    "photo.jpg",
+    "photo.png",
+    "photo.webp",
+    "photo.heic"
+  ],
+  "env": {},
+  "cwd": "/in",
+  "load": [
+    {
+      "from": "fixtures/photo.jpg",
+      "to": "/in/photo.jpg"
+    },
+    {
+      "from": "fixtures/photo.png",
+      "to": "/in/photo.png"
+    },
+    {
+      "from": "fixtures/photo.webp",
+      "to": "/in/photo.webp"
+    },
+    {
+      "from": "fixtures/photo.heic",
+      "to": "/in/photo.heic"
+    }
+  ],
+  "expect": {
+    "exitCode": 0,
+    "maxWallMs": 15000,
+    "stdoutSha256": "989629c0c8d68c976e788fab4fd5708d8f0f1ede108a24ee941dccc4520a7d87"
+  }
+}

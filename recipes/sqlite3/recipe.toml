@@ -1,0 +1,26 @@
+name = "sqlite3"
+version = "3.54.0"
+# The sqlite3 command-line shell as a wasm32-wasip1 command on the nano `wasm`
+# runner (host wasm engine), built with wasi-sdk clang from the official
+# amalgamation (shell.c + sqlite3.c). Single-threaded, no extension loading.
+kind = "wasm-app"
+abi = "wasm32-wasip1"
+license = "blessing"   # SQLite is in the public domain (https://sqlite.org/copyright.html)
+
+[source]
+url = "https://sqlite.org/2026/sqlite-amalgamation-3540000.zip"
+sha256 = "68e913b0fe8ec6b4e5f391c594a28872884e80d6cd042a1e50c957be46b5aa4d"
+
+[entrypoint]
+argv = ["sqlite3"]
+env = { }
+
+[bundle]
+topics = ["Data"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.sqlite3"]

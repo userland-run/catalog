@@ -1,0 +1,22 @@
+{
+  "cmd": [
+    "pdfcpu",
+    "info",
+    "-c",
+    "disable",
+    "a.pdf"
+  ],
+  "env": {},
+  "cwd": "/in",
+  "load": [
+    {
+      "from": "fixtures/a.pdf",
+      "to": "/in/a.pdf"
+    }
+  ],
+  "expect": {
+    "exitCode": 0,
+    "maxWallMs": 60000,
+    "stdoutSha256": "d266dc987180a6060bbd6de68001e5aed282a43a76718e84c905327b49ee7c7e"
+  }
+}

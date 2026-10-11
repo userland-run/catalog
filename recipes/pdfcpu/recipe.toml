@@ -1,0 +1,29 @@
+name = "pdfcpu"
+version = "0.16.1"
+# The pdfcpu PDF processor CLI (merge, split, optimize, encrypt/decrypt, info,
+# validate, ...) as a wasm32-wasip1 command on the nano `wasm` runner, built
+# with Go's GOOS=wasip1 GOARCH=wasm port (pure Go, CGO off).
+# Note: pass `-c disable` (stateless mode) — there is no $HOME/$XDG_CONFIG_HOME
+# config dir in the sandbox, and pdfcpu would otherwise refuse to start.
+# Output dirs (e.g. for `split`) must already exist.
+kind = "wasm-app"
+abi = "wasm32-wasip1"
+license = "Apache-2.0"
+
+[source]
+git = "https://github.com/pdfcpu/pdfcpu"
+rev = "v0.16.1"
+
+[entrypoint]
+argv = ["pdfcpu"]
+env = { }
+
+[bundle]
+topics = ["Documents"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.pdfcpu"]

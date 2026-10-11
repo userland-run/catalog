@@ -1,0 +1,30 @@
+name = "exifstrip"
+version = "0.1.0"
+# A wasm32-wasip1 command on the nano `wasm` runner (host wasm engine).
+# Lossless photo-metadata removal: EXIF/GPS, XMP, IPTC, ICC and comments are
+# dropped from JPEG/PNG/WebP without re-encoding pixels; HEIF/HEIC/AVIF Exif/XMP
+# items are blanked in place.
+#   exifstrip strip [--keep-orientation] [--keep-icc] [-o OUTDIR] FILES|DIRS...
+#   exifstrip show FILES|DIRS...
+kind = "wasm-app"
+abi = "wasm32-wasip1"
+license = "AGPL-3.0-only OR LicenseRef-UEL"   # nano apps/core; no third-party runtime deps
+
+[source]
+git = "https://github.com/userland-run/nano"
+rev = "main"
+# Source subtree: apps/core/build/exifstrip (built by build.sh below).
+
+[entrypoint]
+argv = ["exifstrip"]
+env = { }
+
+[bundle]
+topics = ["Images"]
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.exifstrip"]
