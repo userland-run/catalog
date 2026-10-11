@@ -1,0 +1,48 @@
+name = "imagemagick"
+version = "7.1.2-33"
+abi = "riscv64gc-linux-musl"
+
+# ImageMagick 7 — one static `magick` binary (RV64GC, musl), cross-compiled with
+# `zig cc` (0.13.0). Delegates built from pinned source and linked in statically:
+# zlib 1.3.1, libjpeg-turbo 3.1.4.1, libpng 1.6.59, libwebp 1.6.0 (+sharpyuv/
+# mux/demux). Formats: JPEG, PNG, WebP (+ IM's built-in coders: GIF, BMP, PNM,
+# TGA, ICO, …). No OpenMP, no threads, no X11, no modules, no external
+# delegate programs, no file mmap; policy/delegates/colors XML compiled in
+# (--enable-zero-configuration), so nothing is read from /etc or /usr/share.
+#
+# Q8, no HDRI: measured on nano it is ~4% faster than Q16 on -resize and halves
+# the pixel-cache RAM (12 MP ≈ 48 MB instead of 96 MB); Q16 is no faster
+# anywhere. Build Q16 with QUANTUM=16 ./build.sh if needed.
+#
+# The legacy tool names are subcommands of the one binary (the package format
+# has no symlinks yet):
+#   magick mogrify -resize 1600x1600 *.jpg      (in place)
+#   magick convert in.png out.webp              (IM6-style; prefer `magick in out`)
+#   magick identify photo.jpg
+#   magick compare / composite / montage / stream
+#
+# Speed (12 MP JPEG on nano, Node 24 on an Apple M3 Max): always decode JPEGs with
+# `-define jpeg:size=WxH` (DCT downscale in libjpeg) when shrinking — e.g.
+#   magick -define jpeg:size=1600x1600 in.jpg -resize 1600x1600 out.jpg   ~8 s
+#   magick -define jpeg:size=800x800   in.jpg -thumbnail 800x800 out.jpg  ~3 s
+# versus ~18 s for a plain -resize 1600x1600 of the full-size decode.
+# WebP: add `-define webp:method=0` (full-size 93 s → 16 s; 1600 px 23 s → 9 s).
+# PNG of a full 12 MP photo is slow (~58 s, 20 MB) — resize first.
+# Avoid `identify -verbose` on big images (statistics/hashes: ~400 s for 12 MP);
+# use `identify` or `-format '%m %wx%h' info:` instead.
+# build.sh also backports upstream fix 2c1021b8a4 (in-place mogrify, #9011).
+
+[source]
+git = "https://github.com/ImageMagick/ImageMagick"
+rev = "7.1.2-33"
+
+[entrypoint]
+argv = ["magick"]
+env = { }
+
+[maintainer]
+name = "userland.run"
+contact = "https://github.com/userland-run/catalog"
+
+[status]
+features = ["catalog.recipe.imagemagick"]

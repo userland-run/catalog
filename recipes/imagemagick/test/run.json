@@ -1,0 +1,49 @@
+{
+  "cmd": [
+    "magick",
+    "/in/photo.jpg",
+    "-resize",
+    "80x60",
+    "-quality",
+    "80",
+    "-write",
+    "/tmp/o.webp",
+    "-write",
+    "/tmp/o.png",
+    "-write",
+    "/tmp/o.jpg",
+    "+delete",
+    "/in/photo.jpg",
+    "/in/logo.png",
+    "/in/small.webp",
+    "/tmp/o.webp",
+    "/tmp/o.png",
+    "/tmp/o.jpg",
+    "-format",
+    "%m %wx%h %[channels] q%q %k\\n",
+    "info:"
+  ],
+  "env": {
+    "LANG": "C"
+  },
+  "load": [
+    {
+      "from": "fixtures/photo.jpg",
+      "to": "/in/photo.jpg"
+    },
+    {
+      "from": "fixtures/logo.png",
+      "to": "/in/logo.png"
+    },
+    {
+      "from": "fixtures/small.webp",
+      "to": "/in/small.webp"
+    }
+  ],
+  "expect": {
+    "exitCode": 0,
+    "stdoutSha256": "802506c882254abd9a15e5b13d720d4671e6984258d4819b8168b064dc981e4c",
+    "maxInstructions": 2000000000,
+    "maxWallMs": 30000
+  }
+}
